@@ -28,6 +28,8 @@ export class YtClock {
   async open(id: string, holder: HTMLElement): Promise<void> {
     await loadApi();
     this.ready = false; this.error = '';
+    try { this.player?.destroy?.(); } catch { /* */ }
+    this.player = null; this.playing = false;
     holder.innerHTML = '<div id="ytp"></div>';
     await new Promise<void>((resolve) => {
       this.player = new window.YT.Player('ytp', {

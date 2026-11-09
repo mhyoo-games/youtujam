@@ -149,3 +149,72 @@ test('난이도 숫자: 어려울수록 크다', () => {
     assert.ok(e >= 1 && h <= 30 && e < h, `${s.title} ${e} < ${h}`);
   }
 });
+
+import { emptyLibrary, touch, addChart, chartsFor, removeChart, removeVideo, sorted, parse as parseLib, merge, migrateOld, find } from '../src/core/library.ts';
+
+test('내 영상 목록: 영상을 바꿔도 채보가 남고, 최근 것부터', () => {
+  const lib = emptyLibrary();
+  const a = touch(lib, 'aaaaaaaaaaa', { title: '노래 A', duration: 200 }, 1000);
+  addChart(a, 4, [{ t: 1, lane: 0, len: 0 }], 1100);
+  const b = touch(lib, 'bbbbbbbbbbb', { title: '노래 B' }, 2000);
+  addChart(b, 7, [{ t: 2, lane: 6, len: 0 }], 2100);
+  assert.equal(chartsFor(find(lib, 'aaaaaaaaaaa'), 4).length, 1, '다른 노래를 해도 A 채보는 그대로');
+  assert.deepEqual(sorted(lib).map((v) => v.id), ['bbbbbbbbbbb', 'aaaaaaaaaaa']);
+  touch(lib, 'aaaaaaaaaaa', {}, 3000);
+  assert.equal(sorted(lib)[0].id, 'aaaaaaaaaaa', '다시 쓰면 맨 위로');
+  assert.equal(find(lib, 'aaaaaaaaaaa')!.title, '노래 A', '제목이 없으면 원래 제목 유지');
+});
+
+test('채보는 덮어쓰지 않고 쌓이고, 건반 수별로 나뉨', () => {
+  const lib = emptyLibrary();
+  const v = touch(lib, 'aaaaaaaaaaa', {}, 1);
+  const c1 = addChart(v, 4, [], 10), c2 = addChart(v, 4, [], 10), c3 = addChart(v, 6, [], 20);
+  assert.notEqual(c1.id, c2.id);
+  assert.deepEqual([c1.name, c2.name, c3.name], ['채보 1', '채보 2', '채보 1']);
+  assert.equal(chartsFor(v, 4).length, 2);
+  assert.equal(chartsFor(v, 6).length, 1);
+  assert.ok(removeChart(v, c1.id));
+  assert.equal(chartsFor(v, 4).length, 1);
+  assert.ok(removeVideo(lib, 'aaaaaaaaaaa'));
+  assert.equal(lib.videos.length, 0);
+});
+
+test('저장 글 읽기: 망가진 값은 걸러냄', () => {
+  assert.deepEqual(parseLib('엉망'), emptyLibrary());
+  assert.deepEqual(parseLib(null), emptyLibrary());
+  const lib = parseLib(JSON.stringify({ videos: [
+    { id: 'aaaaaaaaaaa', title: 'A', charts: [{ id: 'x', lanes: 4, at: 1, name: '채보 1', notes: [{ t: 1, lane: 0, len: 0 }, { t: 2, lane: 9, len: 0 }, { t: 'x', lane: 1 }] }, { id: 'y', lanes: 3, notes: [] }] },
+    { id: '나쁜 id' },
+  ] }));
+  assert.equal(lib.videos.length, 1);
+  assert.equal(lib.videos[0].charts.length, 1, '3건반 채보는 버림');
+  assert.deepEqual(lib.videos[0].charts[0].notes, [{ t: 1, lane: 0, len: 0 }]);
+});
+
+test('백업 합치기: 겹치는 채보는 한 번만', () => {
+  const mine = emptyLibrary();
+  const v = touch(mine, 'aaaaaaaaaaa', { title: 'A' }, 1);
+  const c = addChart(v, 4, [], 5);
+  const backup = parseLib(JSON.stringify(mine));
+  addChart(touch(backup, 'aaaaaaaaaaa', {}, 9), 4, [], 9);
+  touch(backup, 'bbbbbbbbbbb', { title: 'B' }, 9);
+  const n = merge(mine, backup);
+  assert.equal(n, 1);
+  assert.equal(chartsFor(find(mine, 'aaaaaaaaaaa'), 4).length, 2);
+  assert.ok(find(mine, 'bbbbbbbbbbb'));
+  assert.ok(find(mine, 'aaaaaaaaaaa')!.charts.some((x) => x.id === c.id));
+});
+
+test('예전 저장 방식에서 옮기기', () => {
+  const lib = emptyLibrary();
+  const n = migrateOld(lib, [
+    ['yj_chart_aaaaaaaaaaa_4', JSON.stringify({ notes: [{ t: 1, lane: 0, len: 0 }], at: 50 })],
+    ['yj_beat_aaaaaaaaaaa', JSON.stringify({ bpm: 128, offset: 0.4 })],
+    ['yj_chart_bbbbbbbbbbb_7', '망가짐'],
+    ['yj_settings', '{}'],
+  ], 100);
+  assert.equal(n, 1);
+  const v = find(lib, 'aaaaaaaaaaa')!;
+  assert.equal(v.bpm, 128);
+  assert.equal(chartsFor(v, 4).length, 1);
+});
