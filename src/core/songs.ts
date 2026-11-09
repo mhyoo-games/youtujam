@@ -1,4 +1,4 @@
-// 자체곡 셋 (모두 새로 쓴 곡). 소리는 audio/synth.ts 가 실시간으로 합성한다.
+// 자체곡 (모두 새로 쓴 곡). 소리는 audio/synth.ts 가 실시간으로 합성한다.
 import { build, type Song } from './music.ts';
 
 const C = (s: string) => s.split(' ');
@@ -32,6 +32,21 @@ export const SONGS: Song[] = [
     { bars: 8, melody: 'A5:1 B5:.5 A5:.5 F#5:1 D5:1 E5:.5 F#5:.5 G5:1 F#5:1 E5:1 D5:1 E5:.5 F#5:.5 A5:1.5 G5:.5 F#5:1 E5:1 D5:2 -:2',
       chords: [C('G2 G3 B3 D4'), C('A2 A3 C#4 E4'), C('F#2 F#3 A3 C#4'), C('B2 B3 D4 F#4')], drums: 'k.hhs.hhk.khs.hh', arp: true },
     { bars: 4, melody: 'D5:2 C#5:1 A4:1 D5:4 -:4 -:4', chords: [C('G2 G3 B3 D4'), C('A2 A3 C#4 E4'), C('D3 D4 F#4 A4')], drums: 'k...h...s...h...' },
+  ]),
+  // 옛 액션 게임 보스 앞에서 몇 번이고 다시 도전하는 기분을 담은 빠른 8비트 록 (멜로디는 새로 씀)
+  song('retry', '아직도 못 깼어', 172, '8비트 록', 'square', '#7ad0ff', [
+    { bars: 4, melody: 'E5:.5 E5:.5 G5:.5 E5:.5 A5:.5 E5:.5 B5:.5 A5:.5 G5:.5 F#5:.5 E5:.5 D5:.5 E5:2',
+      chords: [C('E2 E3 G3 B3'), C('E2 E3 G3 B3'), C('C3 C4 E4 G4'), C('D3 D4 F#4 A4')], drums: 'k.k.s.k.k.k.s.ss' },
+    { bars: 8, melody: 'B4:.5 E5:.5 E5:.5 F#5:.5 G5:1 F#5:.5 E5:.5 D5:.5 E5:.5 F#5:1 A5:1 G5:.5 F#5:.5 E5:.5 E5:.5 D5:.5 E5:.5 G5:1 B5:1 A5:.5 G5:.5 F#5:.5 G5:.5 F#5:2',
+      chords: [C('E2 E3 G3 B3'), C('C3 C4 E4 G4'), C('D3 D4 F#4 A4'), C('B2 B3 D#4 F#4')], drums: 'k.h.s.h.k.k.s.h.' },
+    { bars: 4, melody: 'A4:1 C5:1 E5:1 A5:1 B4:1 D#5:1 F#5:1 B5:1 C5:.5 E5:.5 G5:.5 C6:.5 G5:1 E5:1 D5:.5 F#5:.5 A5:.5 D6:.5 C6:.5 B5:.5 A5:.5 F#5:.5',
+      chords: [C('A2 A3 C4 E4'), C('B2 B3 D#4 F#4'), C('C3 C4 E4 G4'), C('D3 D4 F#4 A4')], drums: 'k.h.s.h.k.h.s.hs' },
+    { bars: 8, melody: 'B5:1 G5:.5 E5:.5 B5:1 C6:1 B5:.5 A5:.5 G5:1 E5:1 G5:1 D6:1 B5:.5 G5:.5 D6:.5 C6:.5 B5:1 A5:1.5 F#5:.5 D5:2 B5:1 G5:.5 E5:.5 B5:1 E6:1 D6:.5 C6:.5 B5:.5 A5:.5 G5:1 E5:1 F#5:.5 G5:.5 A5:.5 B5:.5 D#6:1 B5:1 B5:3 -:1',
+      chords: [C('E2 E3 G3 B3'), C('C3 C4 E4 G4'), C('G2 G3 B3 D4'), C('D3 D4 F#4 A4'), C('E2 E3 G3 B3'), C('C3 C4 E4 G4'), C('B2 B3 D#4 F#4'), C('B2 B3 D#4 F#4')], drums: 'k.h.s.hkk.h.s.hs' },
+    { bars: 8, melody: 'B5:1 G5:.5 E5:.5 B5:1 C6:1 B5:.5 A5:.5 G5:1 E5:1 G5:1 D6:1 B5:.5 G5:.5 D6:.5 C6:.5 B5:1 A5:1.5 F#5:.5 D5:2 B5:1 G5:.5 E5:.5 B5:1 E6:1 D6:.5 C6:.5 B5:.5 A5:.5 G5:1 E5:1 F#5:.5 G5:.5 A5:.5 B5:.5 D#6:1 F#6:1 E6:3 -:1',
+      chords: [C('E2 E3 G3 B3'), C('C3 C4 E4 G4'), C('G2 G3 B3 D4'), C('D3 D4 F#4 A4'), C('E2 E3 G3 B3'), C('C3 C4 E4 G4'), C('B2 B3 D#4 F#4'), C('E2 E3 G3 B3')], drums: 'kshskshskshsKshs', arp: true },
+    { bars: 4, melody: 'E6:.5 B5:.5 G5:.5 E5:.5 B5:.5 G5:.5 E5:.5 B4:.5 E5:4 -:4 -:4',
+      chords: [C('E2 E3 G3 B3'), C('C3 C4 E4 G4'), C('D3 D4 F#4 A4'), C('E2 E3 G3 B3')], drums: 'k.k.s...k.k.s.ss' },
   ]),
 ];
 

@@ -667,10 +667,10 @@ function drawSelect(): void {
   backButton();
   const list = entries();
   list.forEach((e, i) => {
-    const y = 70 + i * 92;
+    const y = 66 + i * 86;
     const on = i === cursor;
-    nine(img(on ? 'yellow_button_rectangle_depth_gloss' : 'grey_button_rectangle_depth_flat'), 60, y, 840, 80, 18);
-    hitRow(i, 60, y, 840, 80);
+    nine(img(on ? 'yellow_button_rectangle_depth_gloss' : 'grey_button_rectangle_depth_flat'), 60, y, 840, 78, 18);
+    hitRow(i, 60, y, 840, 78);
     g.fillStyle = e.color; g.fillRect(76, y + 14, 10, 46);
     text(e.title, 104, y + 28, 22, on ? '#3b2a00' : '#2a2440', 'left', 'GalmuriB');
     text(e.sub, 104, y + 56, 13, on ? '#5a4410' : '#4a4466');
