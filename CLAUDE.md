@@ -15,7 +15,7 @@ GitHub Pages(`https://minhyuk94.github.io/youtujam/`)에 올린다.
 - 규칙(채보·판정·점수·잼 게이지·키 배치)은 `src/core/`에 화면과 분리한 순수 TS (import에 `.ts` → `node --test`로 바로 테스트). 새 규칙에는 `tests/core.test.ts`에 테스트를 더한다.
 - 유튜브는 IFrame Player API(키 필요 없음). 소리를 분석할 수 없으므로 채보는 BPM·첫 박으로 만들거나 직접 쳐서 녹음한다. 영상은 화면에 보이게 둔다(약관).
 - 내 영상 목록(`src/core/library.ts`): 불러온 영상·BPM·직접 친 채보(여러 개, 덮어쓰지 않음)를 localStorage `yj_library` 하나에 저장. 모양을 바꾸면 `parse`가 예전 값을 읽을 수 있게 하고 테스트를 더한다. 백업 파일 내보내기·가져오기(`merge`). 리듬 채보(`lanes: 1`)는 박자만 저장하고, 할 때 `arrangeTaps`(chart.ts)로 건반 수·난이도에 맞춰 칸을 정한다.
-- 클래식은 작곡가 사후 70년이 지난 곡만, 멜로디를 새로 편곡해 `songs.ts`에 쓴다(악보·음원 파일을 가져오지 않음). 반주는 `music.ts`의 `acc`(broken3/broken8/march), 셋잇단은 길이를 분수(`1/3`)로. 드럼 없는 곡의 어려움은 왼손 첫 음을 노트로 더한다(`chart.ts`).
+- 클래식은 작곡가 사후 70년이 지난 곡만, 멜로디를 새로 편곡해 `songs.ts`에 쓴다(악보·음원 파일을 가져오지 않음). 반주는 `music.ts`의 `acc`(broken3/broken8/march), 셋잇단은 길이를 분수(`1/3`)로, 3박자는 구역의 `meter: 3`, 전조·옥타브는 `transpose`. 드럼 없는 곡의 어려움은 왼손 첫 음을 노트로 더한다(`chart.ts`).
 - 휴대폰 화면: 가로로 길면 `VW`(실제 폭)를 넓히고, 메뉴는 960 폭을 가운데(`OX`), 하는 중엔 `geo()`가 판을 가로 전체·아래 큰 패드로. 아이폰은 브라우저 전체 화면이 없어 홈 화면에 추가 안내, `#stage`가 안전 영역을 피한다.
 - 소리: 곡마다 볼륨 줄(bus)을 새로 만들어, 곡을 바꾸면 예약된 소리까지 바로 끊는다(미리듣기가 겹쳐 밀리지 않게).
 - 시계: 자체곡은 `AudioContext.getOutputTimestamp`로 스피커 시각과 화면 시각을 이어 붙이고, 판정은 키 이벤트의 `timeStamp`로 한다.

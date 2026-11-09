@@ -17,10 +17,14 @@ export function fromSong(song: Song, lanes: number, level: Level): Chart {
   song.events.forEach((e, i) => index.set(e, i));
   // 드럼이 없는 곡(클래식): 어려움에서는 피아노 왼손의 마디 첫 음(vel 1)을 노트로 더한다
   const drumless = !song.events.some((e) => e.part === 'kick');
+  let lastEasy = -99;
   for (const e of song.events) {
     if (e.part === 'keys') { if (drumless && level === 'hard' && e.vel >= 1) pick.push(e); continue; }
     if (e.part === 'lead') {
       if (level === 'easy' && Math.abs(e.t * 2 - Math.round(e.t * 2)) > 1e-6) continue; // 반 박에 걸친 것만
+      // 드럼 없는 곡의 쉬움은 너무 촘촘한 음을 건너뛴다 (8분음표가 이어지면 하나 걸러)
+      if (level === 'easy' && drumless && e.t - lastEasy < 0.75 - 1e-6) continue;
+      if (level === 'easy') lastEasy = e.t;
       pick.push(e);
     } else if (e.part === 'kick' && level !== 'easy') {
       if (level === 'normal' && e.t % 1 !== 0) continue;

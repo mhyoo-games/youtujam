@@ -284,3 +284,12 @@ test('FAST/SLOW와 평균 오차', () => {
   const ms = typicalOffsetMs(late)!;
   assert.ok(ms >= 15 && ms <= 25, String(ms));
 });
+
+import { transpose, noteName } from '../src/core/music.ts';
+test('옮기기(전조)와 3박자 마디', () => {
+  assert.equal(transpose('C5:1 -:.5 A#4:1/3', 2), 'D5:1 -:.5 C5:1/3');
+  assert.equal(noteName(61), 'C#4');
+  const bolero = SONGS.find((s) => s.id === 'bolero')!;
+  assert.ok(bolero.bars!.every((b, i, a) => i === 0 || b - a[i - 1] === 3), '볼레로는 마디가 3박');
+  assert.equal(bolero.beats, bolero.bars!.length * 3);
+});

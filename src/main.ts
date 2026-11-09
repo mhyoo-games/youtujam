@@ -405,7 +405,9 @@ function field(p: Play, x0: number): void {
   // 마디선
   if (p.song) {
     const spb = 60 / p.song.bpm;
-    for (let b = Math.max(0, Math.floor(now / spb / 4) * 4); b < (now + 3) / spb; b += 4) {
+    for (const b of p.song.bars ?? []) {
+      if (b * spb < now - 0.2) continue;
+      if (b * spb > now + 3) break;
       const y = hitY - (b * spb - now) * pxs;
       if (y < 0 || y > hitY) continue;
       g.fillStyle = 'rgba(255,255,255,0.22)'; g.fillRect(x0, y, fw, 1);
