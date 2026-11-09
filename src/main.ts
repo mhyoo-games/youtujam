@@ -53,7 +53,10 @@ const NOTE_GRAD: Record<string, [string, string, string]> = {
   blue: ['#bfe6ff', '#3fa2ff', '#1a4fa8'],
   yellow: ['#fff3b8', '#ffc83d', '#b9780e'],
 };
-function laneW(lanes: number): number { return ({ 4: 78, 5: 66, 6: 58, 7: 52 } as Record<number, number>)[lanes] ?? 52; }
+function laneW(lanes: number): number {
+  const t: Record<number, number> = phone() ? { 4: 138, 5: 114, 6: 96, 7: 84 } : { 4: 78, 5: 66, 6: 58, 7: 52 };
+  return t[lanes] ?? 52;
+}
 const HEX: Record<string, string> = { blue: '#4fb0ff', green: '#4fe08a', red: '#ff5a6e', yellow: '#ffc94f', grey: '#d9dcef', white: '#e8ecff' };
 
 const synth = new Synth();
@@ -61,8 +64,8 @@ const sfx = new Sfx(synth, './');
 const yt = new YtClock();
 
 // ── 설정 (브라우저에 저장) ──
-interface Settings { lanes: number; speed: number; offset: number; noFail: boolean; level: Level; hitSound: string; hitVol: number; meter: boolean }
-const DEF: Settings = { lanes: 4, speed: 2.5, offset: 0, noFail: false, level: 'normal', hitSound: 'tok', hitVol: 0.6, meter: true };
+interface Settings { lanes: number; speed: number; offset: number; noFail: boolean; level: Level; hitSound: string; hitVol: number; meter: boolean; mobile: string; vibrate: boolean }
+const DEF: Settings = { lanes: 4, speed: 2.5, offset: 0, noFail: false, level: 'normal', hitSound: 'tok', hitVol: 0.6, meter: true, mobile: 'auto', vibrate: true };
 const HIT_SOUNDS = ['tok', 'tak', 'chak', 'kung', 'off'];
 const HIT_KO: Record<string, string> = { tok: '톡 (나무)', tak: '딱 (테두리)', chak: '착 (심벌)', kung: '쿵 (북)', off: '끔' };
 function loadJson<T>(k: string, d: T): T {
@@ -73,6 +76,28 @@ const set: Settings = loadJson('yj_settings', DEF);
 // 예전엔 타격음이 켬/끔이었음
 if (typeof (set.hitSound as unknown) === 'boolean') set.hitSound = (set.hitSound as unknown) ? 'tok' : 'off';
 if (!HIT_SOUNDS.includes(set.hitSound)) set.hitSound = 'tok';
+
+// ── 휴대폰 모드: 손가락으로 하는 기기면 건반을 크게, 칠 때 진동 ──
+const coarse = matchMedia('(pointer: coarse)').matches;
+const MOBILE = ['auto', 'on', 'off'];
+const MOBILE_KO: Record<string, string> = { auto: `자동 (${coarse ? '휴대폰' : 'PC'})`, on: '켬', off: '끔' };
+function phone(): boolean { return set.mobile === 'on' || (set.mobile === 'auto' && coarse); }
+function buzz(ms: number): void { if (set.vibrate && phone()) navigator.vibrate?.(ms); }
+
+// ── 전체 화면 ──
+let toast = '', toastAt = -9999;
+function say(t: string): void { toast = t; toastAt = performance.now(); }
+function isFs(): boolean { return !!(document.fullscreenElement || (document as any).webkitFullscreenElement); }
+function toggleFs(): void {
+  const el = document.documentElement as any;
+  if (isFs()) { (document.exitFullscreen ?? (document as any).webkitExitFullscreen)?.call(document); return; }
+  const req = el.requestFullscreen ?? el.webkitRequestFullscreen;
+  if (!req) { say('이 기기는 전체 화면을 못 해요. 아이폰은 공유 → "홈 화면에 추가"로 열면 꽉 차요.'); return; }
+  Promise.resolve(req.call(el, { navigationUI: 'hide' }))
+    .then(() => (window.screen.orientation as any)?.lock?.('landscape').catch(() => {}))
+    .catch(() => say('전체 화면을 켜지 못했어요. 한 번 더 눌러 보세요.'));
+}
+document.addEventListener('fullscreenchange', () => fit());
 const best: Record<string, { score: number; rank: string }> = loadJson('yj_best', {});
 
 // ── 그리기 도우미 ──
@@ -150,7 +175,18 @@ function clock(perfMs = performance.now()): number {
 }
 
 /** 판의 왼쪽 끝: 자체곡은 왼쪽(오른쪽은 배경 영상), 유튜브는 영상 오른쪽 */
-function fieldX(_p: Play): number { return 44; }
+function fieldX(_p: Play): number { return phone() ? 26 : 44; }
+/** 판 오른쪽 정보 자리: [x, 너비, 배경 영상 높이] */
+function hud(p: Play): [number, number, number] {
+  if (!phone()) return [470, 466, 300];
+  const hx = fieldX(p) + p.chart.lanes * laneW(p.chart.lanes) + 52;
+  const hw = W - hx - 14;
+  return [hx, hw, Math.round((hw * 9) / 16)];
+}
+/** 유튜브 영상 자리 */
+function placeYt(x: number, y: number, w: number, h: number): void {
+  Object.assign(ytBox.style, { left: `${x}px`, top: `${y}px`, width: `${w}px`, height: `${h}px` });
+}
 
 function keyName(lanes: number, i: number): string { return KEYLABEL[KEYMAPS[lanes][i]] ?? '?'; }
 
@@ -385,7 +421,7 @@ function field(p: Play, x0: number): void {
   jg.addColorStop(0, '#ff4fa8'); jg.addColorStop(0.5, '#ffd75a'); jg.addColorStop(1, '#4fe0ff');
   g.fillStyle = jg; g.fillRect(x0 + 1, jy + 1, (fw - 2) * Math.min(1, p.tally.jam / 100), 10);
   for (let k = 1; k < 10; k++) { g.fillStyle = 'rgba(0,0,0,0.5)'; g.fillRect(x0 + (fw * k) / 10, jy + 1, 1, 10); }
-  text('JAM', x0 - 8, jy + 6, 9, '#ffd75a', 'right', 'KFuture');
+  if (x0 >= 40) text('JAM', x0 - 8, jy + 6, 9, '#ffd75a', 'right', 'KFuture');
   // 판정선 불꽃
   g.save(); g.globalCompositeOperation = 'lighter';
   p.bursts = p.bursts.filter((f) => ms - f.at < 240);
@@ -548,32 +584,43 @@ function drawPlay(): void {
   field(p, x0);
   // 오른쪽(자체곡) 또는 영상 아래(유튜브)에 곡 정보·점수
   const own = p.mode === 'own';
-  const hx = 470, hw = 466;
+  const [hx, hw, bh] = hud(p);
+  const ph = phone();
   const lv = levelNumber(p.chart, p.length);
+  const info = p.mode === 'record' ? (p.tap ? '리듬 녹음' : `${p.chart.lanes}K  녹음`) : `${p.chart.lanes}K  ${LEVEL_KO[p.chart.level]}  Lv.${lv}  ×${set.speed.toFixed(1)}`;
   if (own) {
-    bga(p, hx, 64, hw, 300);
-    text(p.title, hx, 24, 20, '#fff', 'left', 'GalmuriB');
-    text(`${p.song!.artist} · BPM ${p.song!.bpm}`, hx, 48, 12, '#cfd3ea');
+    bga(p, hx, 64, hw, bh);
+    text(fit2(p.title, ph ? hw : hw - 180, 20), hx, 24, 20, '#fff', 'left', 'GalmuriB');
+    text(ph ? info : `${p.song!.artist} · BPM ${p.song!.bpm}`, hx, 48, 12, ph ? '#ffd75a' : '#cfd3ea');
   } else {
-    text(fit2(p.title, hw - 160, 16), hx, 24, 16, '#fff', 'left', 'GalmuriB');
+    placeYt(hx, 64, hw, ph ? bh : 262);
+    text(fit2(p.title, ph ? hw : hw - 160, 16), hx, 24, 16, '#fff', 'left', 'GalmuriB');
     const c = p.chartId ? Lib.chartsFor(Lib.find(lib, p.ytId!), p.chart.lanes).find((x) => x.id === p.chartId) : undefined;
-    text(p.mode === 'record' ? (p.tap ? '● 리듬 녹음 중 — 노트가 나올 때마다 아무 키나 · 길게=길게 · Esc 저장' : '● 녹음 중 — 노래에 맞춰 건반을 치세요 · Esc 끝내고 저장') : c ? `유튜브 · 내 ${c.name}` : '유튜브 · 박자 채보', hx, 48, 12, p.mode === 'record' ? '#ff8a8a' : '#cfd3ea');
+    const sub = p.mode === 'record' ? (p.tap ? (ph ? '● 리듬 녹음 — 노트 자리마다 아무 데나 톡' : '● 리듬 녹음 중 — 노트가 나올 때마다 아무 키나 · 길게=길게 · Esc 저장') : (ph ? '● 녹음 중' : '● 녹음 중 — 노래에 맞춰 건반을 치세요 · Esc 끝내고 저장')) : (c ? `유튜브 · 내 ${c.name}` : '유튜브 · 박자 채보') + (ph ? `  ${info}` : '');
+    text(fit2(sub, hw, 12), hx, 48, 12, p.mode === 'record' ? '#ff8a8a' : '#cfd3ea');
   }
-  text(p.mode === 'record' ? (p.tap ? '리듬 녹음' : `${p.chart.lanes}K  녹음`) : `${p.chart.lanes}K  ${LEVEL_KO[p.chart.level]}  Lv.${lv}  ×${set.speed.toFixed(1)}`, hx + hw, 24, 13, '#ffd75a', 'right');
-  const sy = 392;
+  if (!ph) text(info, hx + hw, 24, 13, '#ffd75a', 'right');
+  const sy = ph ? 64 + bh + 14 : 392;
   nine(img('grey_button_rectangle_depth_flat'), hx, sy, hw, 120, 16);
   text('SCORE', hx + 20, sy + 26, 12, '#4a4466', 'left', 'KFuture');
   text(String(p.tally.score).padStart(7, '0'), hx + hw - 20, sy + 30, 30, '#2a2440', 'right', 'KFuture');
-  if (p.mode !== 'record') text(`정확도 ${accuracy(p.tally).toFixed(1)}%   최대 콤보 ${p.tally.maxCombo}   JAM ${p.tally.jamCombo}`, hx + 20, sy + 66, 13, '#2a2440');
+  if (p.mode !== 'record') text(fit2(`정확도 ${accuracy(p.tally).toFixed(1)}%   최대 콤보 ${p.tally.maxCombo}   JAM ${p.tally.jamCombo}`, hw - 40, 13), hx + 20, sy + 66, 13, '#2a2440');
   const prog = Math.max(0, Math.min(1, now / p.length));
   g.fillStyle = '#b9bdd3'; g.fillRect(hx + 20, sy + 88, hw - 40, 8);
   g.fillStyle = '#ff4fa8'; g.fillRect(hx + 20, sy + 88, (hw - 40) * prog, 8);
   if (p.mode === 'record') text(`${p.tap ? '친 박자' : '친 노트'} ${p.rec.length + p.tapDown.size}`, hx + 20, sy + 66, 13, '#c0303f');
   if (now < 0) text(String(Math.ceil(-now)), x0 + (p.chart.lanes * laneW(p.chart.lanes)) / 2, 150, 64, '#ffd75a', 'center', 'KFuture');
+  // 손가락용 멈춤(녹음 중엔 끝내고 저장) 버튼
+  if (ph || coarse) {
+    const by = ph ? Math.min(H - 64, sy + 134) : 20, bx = ph ? hx : W - 150, bw = ph ? hw : 130;
+    button(p.mode === 'record' ? '■ 끝내고 저장' : 'Ⅱ 멈춤', bx, by, bw, ph ? 52 : 36, false, p.mode === 'record' ? 'red' : 'grey');
+    hitAct(bx, by, bw, ph ? 52 : 36, () => (p.mode === 'record' ? finish() : pauseGame()));
+  }
   if (p.paused) {
-    g.fillStyle = 'rgba(0,0,0,0.6)'; g.fillRect(0, 0, W, H);
-    text('잠깐 멈춤', W / 2, 220, 32, '#fff', 'center');
-    text('Enter 계속 · Esc 그만두기', W / 2, 270, 16, '#cfd3ea', 'center');
+    g.fillStyle = 'rgba(0,0,0,0.65)'; g.fillRect(0, 0, W, H);
+    text('잠깐 멈춤', W / 2, 140, 32, '#fff', 'center', 'GalmuriB');
+    const items: Array<[string, () => void, string]> = [['계속하기 (Enter)', resumeGame, 'blue'], ['그만두기 (Esc)', quitGame, 'red'], [isFs() ? '전체 화면 끄기' : '전체 화면', toggleFs, 'grey']];
+    items.forEach(([label, act, col], i) => { const y = 190 + i * 76; button(label, W / 2 - 150, y, 300, 60, false, col); hitAct(W / 2 - 150, y, 300, 60, act); });
   }
 }
 
@@ -581,8 +628,8 @@ function drawTitle(): void {
   background(performance.now() / 1000);
   text('유튜잼', W / 2, 150, 72, '#ffd75a', 'center', 'GalmuriB');
   text('YOUTUJAM', W / 2, 205, 22, '#cfd3ea', 'center', 'KFuture');
-  const items = ['곡 고르기', '설정'];
-  items.forEach((s, i) => { button(s, W / 2 - 120, 280 + i * 70, 240, 54, cursor === i); hitRow(i, W / 2 - 120, 280 + i * 70, 240, 54); });
+  const items = ['곡 고르기', '설정', isFs() ? '전체 화면 끄기' : '전체 화면'];
+  items.forEach((s, i) => { button(s, W / 2 - 120, 260 + i * 66, 240, 54, cursor === i); hitRow(i, W / 2 - 120, 260 + i * 66, 240, 54); });
   text('↑↓ 고르기 · Enter 결정 · 4건반 D F J K · 5건반 D F ␣ J K · 6건반 S D F J K L · 7건반 S D F ␣ J K L', W / 2, 500, 12, '#a9a4c8', 'center');
 }
 
@@ -614,7 +661,10 @@ function preview(): void {
 function drawSelect(): void {
   background(performance.now() / 1000, entries()[cursor]?.color);
   text('곡 고르기', 30, 34, 22, '#fff', 'left', 'GalmuriB');
-  text(`${set.lanes}건반 · ${{ easy: '쉬움', normal: '보통', hard: '어려움' }[set.level]}   (←→ 난이도, Tab 건반 수)`, W - 30, 34, 14, '#cfd3ea', 'right');
+  button(`${set.lanes}건반 ▶`, 170, 12, 120, 40, false, 'blue');
+  hitAct(170, 12, 120, 40, () => key('Tab', true, false));
+  text('←→ 난이도 · Tab 건반 수', 304, 33, 12, '#a9a4c8');
+  backButton();
   const list = entries();
   list.forEach((e, i) => {
     const y = 70 + i * 92;
@@ -630,6 +680,7 @@ function drawSelect(): void {
       const lvs = levelsOf(e.song);
       (['easy', 'normal', 'hard'] as Level[]).forEach((l, k) => {
         const lx = 640 + k * 82, sel = l === set.level;
+        hitAct(lx - 2, y + 40, 80, 36, () => { set.level = l; saveJson('yj_settings', set); cursor = i; sfx.play('click-a', 0.3); });
         g.fillStyle = sel ? (on ? '#3b2a00' : '#2a2440') : 'rgba(40,36,64,0.18)';
         g.beginPath(); g.roundRect(lx, y + 46, 76, 22, 6); g.fill();
         text(`${LEVEL_KO[l]} ${lvs[l]}`, lx + 38, y + 57, 12, sel ? '#ffd75a' : on ? '#5a4410' : '#4a4466', 'center');
@@ -643,20 +694,23 @@ function drawSelect(): void {
   text('Enter 시작 · Esc 뒤로 · 고른 곡의 후렴을 미리 들려줍니다', W / 2, 520, 12, '#a9a4c8', 'center');
 }
 
-const SET_ROWS = ['건반 수', '난이도', '노트 속도', '판정 맞추기 (ms)', '자동으로 맞추기 (박자에 맞춰 Space)', '타격음', '타격음 크기', '판정 오차 막대 (FAST·SLOW)', '체력 0이 돼도 계속', '돌아가기'];
+const SET_ROWS = ['건반 수', '난이도', '노트 속도', '판정 맞추기 (ms)', '자동으로 맞추기 (박자에 맞춰 Space)', '타격음', '타격음 크기', '판정 오차 막대 (FAST·SLOW)', '체력 0이 돼도 계속', '휴대폰 모드 (큰 건반·진동)', '진동 (휴대폰 모드)', '돌아가기'];
 function drawSettings(): void {
   background(performance.now() / 1000);
   text('설정', 30, 34, 22, '#fff', 'left', 'GalmuriB');
-  const vals = [`${set.lanes}건반`, { easy: '쉬움', normal: '보통', hard: '어려움' }[set.level], `×${set.speed.toFixed(1)}`, `${set.offset > 0 ? '+' : ''}${set.offset}`, '', HIT_KO[set.hitSound], `${Math.round(set.hitVol * 100)}%`, set.meter ? '켬' : '끔', set.noFail ? '켬' : '끔', ''];
+  const vals = [`${set.lanes}건반`, { easy: '쉬움', normal: '보통', hard: '어려움' }[set.level], `×${set.speed.toFixed(1)}`, `${set.offset > 0 ? '+' : ''}${set.offset}`, '', HIT_KO[set.hitSound], `${Math.round(set.hitVol * 100)}%`, set.meter ? '켬' : '끔', set.noFail ? '켬' : '끔', MOBILE_KO[set.mobile], set.vibrate ? '켬' : '끔', ''];
   SET_ROWS.forEach((r, i) => {
-    const y = 62 + i * 42;
+    // 두 줄로 크게 (손가락으로도 누르기 쉽게)
+    const col = i < 6 ? 0 : 1, x = 30 + col * 456, y = 66 + (i % 6) * 68, w = 444, h = 58;
     const on = i === cursor;
-    nine(img(on ? 'yellow_button_rectangle_depth_gloss' : 'grey_button_rectangle_depth_flat'), 180, y, 600, 36, 14);
-    hitRow(i, 180, y, 600, 36);
-    text(r, 210, y + 16, 15, on ? '#3b2a00' : '#2a2440');
-    if (vals[i]) text(`◀ ${vals[i]} ▶`, 750, y + 16, 15, on ? '#3b2a00' : '#2a2440', 'right');
+    nine(img(on ? 'yellow_button_rectangle_depth_gloss' : 'grey_button_rectangle_depth_flat'), x, y, w, h, 16);
+    if (vals[i]) hitArrows(i, x, y, w, h, 0.6);
+    hitRow(i, x, y, w, h);
+    text(fit2(r, vals[i] ? 250 : w - 40, 15), x + 18, y + 26, 15, on ? '#3b2a00' : '#2a2440');
+    if (vals[i]) text(`◀ ${vals[i]} ▶`, x + w - 16, y + 26, 15, on ? '#3b2a00' : '#2a2440', 'right');
   });
-  text(settingsMsg || '판정 맞추기: 늘 늦게 맞으면 +, 일찍 맞으면 − 쪽으로. 모르겠으면 "자동으로 맞추기"', W / 2, 505, 12, settingsMsg ? '#ffd75a' : '#a9a4c8', 'center');
+  backButton();
+  text(settingsMsg || '판정 맞추기: 늘 늦게 맞으면 +, 일찍 맞으면 − 쪽으로. 모르겠으면 "자동으로 맞추기"', W / 2, 500, 12, settingsMsg ? '#ffd75a' : '#a9a4c8', 'center');
 }
 
 // ── 판정 자동 맞추기: 박자 소리 16번에 맞춰 누르면 버릇(늦게/일찍)을 재서 판정 맞추기에 넣는다 ──
@@ -696,7 +750,8 @@ function drawCalib(): void {
   if (performance.now() - cal.flash < 120) { g.strokeStyle = '#4fe08a'; g.lineWidth = 6; g.beginPath(); g.arc(W / 2, 270, 110, 0, Math.PI * 2); g.stroke(); }
   text(t < 0 ? '준비…' : `${Math.min(CAL_N, beat + 1)} / ${CAL_N}`, W / 2, 270, 28, '#2a2440', 'center', 'GalmuriB');
   text(`누른 횟수 ${cal.taps.length}`, W / 2, 420, 16, '#fff', 'center');
-  text('Esc 그만두기', W / 2, 505, 12, '#a9a4c8', 'center');
+  text(coarse ? '가운데 동그라미를 소리에 맞춰 톡톡' : 'Esc 그만두기', W / 2, 505, 12, '#a9a4c8', 'center');
+  backButton();
 }
 
 // ── 유튜브: 내 영상 목록 (붙여 넣은 영상과 직접 친 채보를 이 브라우저에 저장) ──
@@ -745,8 +800,21 @@ function ytCount(): number { return YT_ROWS.length + lib.videos.length + 2; }
 function libIndex(c: number): number { return c - YT_ROWS.length; }
 
 // 눌러서 고를 수 있는 자리 (마우스·손가락)
-let hits: Array<{ x: number; y: number; w: number; h: number; i: number }> = [];
+let hits: Array<{ x: number; y: number; w: number; h: number; i: number; act?: () => void }> = [];
 function hitRow(i: number, x: number, y: number, w: number, h: number): void { hits.push({ x, y, w, h, i }); }
+/** 누르면 바로 이 일을 하는 자리 (먼저 넣은 것이 먼저) */
+function hitAct(x: number, y: number, w: number, h: number, act: () => void): void { hits.unshift({ x, y, w, h, i: -1, act }); }
+/** ◀ 값 ▶ 줄: 오른쪽 끝 두 칸을 누르면 값이 바뀐다 */
+function hitArrows(i: number, x: number, y: number, w: number, h: number, left = 0.62): void {
+  const ax = x + w * left, mid = x + w * (left + (1 - left) / 2);
+  hitAct(ax, y, mid - ax, h, () => { cursor = i; key('ArrowLeft', true, false); });
+  hitAct(mid, y, x + w - mid, h, () => { cursor = i; key('ArrowRight', true, false); });
+}
+/** 화면 오른쪽 위 "뒤로" (휴대폰엔 Esc가 없으니) */
+function backButton(): void {
+  button('◀ 뒤로', W - 132, 10, 118, 40, false, 'grey');
+  hitAct(W - 132, 10, 118, 40, () => key('Escape', true, false));
+}
 
 function fit2(s: string, w: number, size: number, font = 'Galmuri'): string {
   g.font = `${size}px ${font}`;
@@ -773,6 +841,7 @@ function drawYt(): void {
     const disabled = (need && !yt.ready) || (i === R.mine && !charts.length);
     g.globalAlpha = disabled ? 0.45 : 1;
     nine(img(on ? 'yellow_button_rectangle_depth_gloss' : 'grey_button_rectangle_depth_flat'), 24, y, 426, 36, 14);
+    if (i === R.mine || i === R.lanes || i === R.bpm || i === R.beat) hitArrows(i, 24, y, 426, 36, 0.55);
     hitRow(i, 24, y, 426, 36);
     const dark = on ? '#3b2a00' : '#2a2440';
     let val = '';
@@ -786,6 +855,7 @@ function drawYt(): void {
     g.globalAlpha = 1;
   });
   // 오른쪽: 영상 자리
+  if (yt.ready) hitAct(470, 64, 466, 262, () => key('Space', true, false)); // 영상을 누르면 재생/멈춤
   if (!yt.ready) {
     g.fillStyle = 'rgba(0,0,0,0.6)'; g.beginPath(); g.roundRect(470, 64, 466, 262, 8); g.fill();
     text('▶ 영상이 여기에 나옵니다', 703, 180, 16, '#cfd3ea', 'center');
@@ -795,6 +865,13 @@ function drawYt(): void {
   const list = Lib.sorted(lib);
   text(`내 영상 목록 (${list.length})`, 470, 344, 14, '#fff', 'left', 'GalmuriB');
   text('이 브라우저에 저장돼요', 936, 344, 11, '#a9a4c8', 'right');
+  if (list.length > LIB_SHOW) {
+    ['▲', '▼'].forEach((a, k) => {
+      const bx = 668 + k * 44;
+      button(a, bx, 330, 38, 26, false, 'grey');
+      hitAct(bx, 330, 38, 26, () => { libTop = Math.max(0, Math.min(list.length - LIB_SHOW, libTop + (k ? 1 : -1))); const c = YT_ROWS.length + libTop + (k ? LIB_SHOW - 1 : 0); cursor = c; });
+    });
+  }
   const li = libIndex(cursor);
   if (li >= 0 && li < list.length) { if (li < libTop) libTop = li; if (li >= libTop + LIB_SHOW) libTop = li - LIB_SHOW + 1; }
   libTop = Math.max(0, Math.min(libTop, Math.max(0, list.length - LIB_SHOW)));
@@ -804,11 +881,14 @@ function drawYt(): void {
     const ci = YT_ROWS.length + idx;
     const y = 358 + k * 38, on = cursor === ci;
     nine(img(on ? 'yellow_button_rectangle_depth_gloss' : 'grey_button_rectangle_depth_flat'), 470, y, 466, 34, 14);
+    // ✕: 두 번 누르면 목록에서 지움
+    hitAct(896, y, 40, 34, () => { cursor = ci; key('Delete', true, false); });
     hitRow(ci, 470, y, 466, 34);
     const dark = on ? '#3b2a00' : '#2a2440';
     const n = it.charts.length;
-    text((it.id === ytId ? '▶ ' : '') + fit2(it.title, 300, 13), 484, y + 15, 13, dark);
-    text(`채보 ${n}개${it.duration ? ' · ' + mmss(it.duration) : ''}`, 922, y + 15, 12, dark, 'right');
+    text((it.id === ytId ? '▶ ' : '') + fit2(it.title, 280, 13), 484, y + 15, 13, dark);
+    text(`채보 ${n}개${it.duration ? ' · ' + mmss(it.duration) : ''}`, 884, y + 15, 12, dark, 'right');
+    text('✕', 916, y + 15, 14, armed === 'v' + it.id ? '#d0304a' : dark, 'center');
   }
   if (list.length > LIB_SHOW) text(`${libTop + 1}–${Math.min(list.length, libTop + LIB_SHOW)} / ${list.length}`, 936, 474, 10, '#a9a4c8', 'right');
   const bi = YT_ROWS.length + list.length;
@@ -819,12 +899,14 @@ function drawYt(): void {
     text(r, x + 115, 496, 12, on ? '#3b2a00' : '#2a2440', 'center');
   });
   if (ytMsg) text(fit2(ytMsg, 426, 12), 24, 486, 12, '#ffd75a');
-  text('Enter 결정 · ←→ 바꾸기 · Space 재생/멈춤 · Delete 지우기(두 번) · Esc 뒤로', 24, 522, 11, '#a9a4c8');
+  text(coarse ? '영상을 누르면 재생/멈춤 · ◀▶를 눌러 값 바꾸기 · ✕ 두 번 지우기' : 'Enter 결정 · ←→ 바꾸기 · Space 재생/멈춤 · Delete 지우기(두 번) · Esc 뒤로', 24, 522, 11, '#a9a4c8');
+  backButton();
 }
 
 /** 유튜브 화면으로 (영상·주소 칸 보이기) */
 function enterYt(c = 0): void {
   screen = 'yt'; cursor = c;
+  placeYt(470, 64, 466, 262);
   form.style.display = 'block';
   ytBox.style.display = yt.ready ? 'block' : 'none';
 }
@@ -851,7 +933,8 @@ function drawResult(): void {
     const msg = Math.abs(off) < 8 ? `타이밍이 잘 맞았어요 (평균 ${off > 0 ? '+' : ''}${off}ms)` : `평균 ${Math.abs(off)}ms ${off > 0 ? '늦게' : '일찍'} 쳤어요 · O 누르면 판정 맞추기에 반영`;
     text(resultMsg || msg, 260, 410, 13, resultMsg ? '#9cf59c' : '#cfd3ea', 'center');
   }
-  text('Enter 다시 하기 · Esc 곡 고르기', W / 2, 500, 14, '#cfd3ea', 'center');
+  const bs: Array<[string, string, string]> = [['다시 하기 (Enter)', 'Enter', 'blue'], ['곡 고르기 (Esc)', 'Escape', 'grey']];
+  bs.forEach(([label, k, col], i) => { const x = W / 2 - 250 + i * 260; button(label, x, 468, 240, 56, false, col); hitAct(x, 468, 240, 56, () => key(k, true, false)); });
 }
 
 // ── 입력 ──
@@ -958,6 +1041,23 @@ window.addEventListener('paste', (e) => {
 });
 
 let pausedAt = 0;
+function pauseGame(): void {
+  const p = play; if (!p || p.paused) return;
+  p.paused = true; pausedAt = performance.now();
+  if (p.mode === 'own') synth.ctx.suspend(); else yt.pause();
+}
+function resumeGame(): void {
+  const p = play; if (!p || !p.paused) return;
+  p.paused = false;
+  if (p.mode === 'own') synth.ctx.resume();
+  else if (p.leadUntil) p.leadUntil += performance.now() - pausedAt; // 세는 중이었으면 이어서 세기
+  else yt.player?.playVideo();
+}
+function quitGame(): void {
+  const p = play; if (!p) return;
+  p.paused = false;
+  if (p.mode === 'own') { synth.stop(); screen = 'select'; synth.ctx.resume(); } else { yt.pause(); enterYt(R.mine); }
+}
 function key(code: string, down: boolean, repeat: boolean, at = performance.now()): void {
   if (screen === 'calib') {
     if (down && !repeat && code === 'Escape') { synth.stop(); screen = 'settings'; settingsMsg = ''; return; }
@@ -967,17 +1067,11 @@ function key(code: string, down: boolean, repeat: boolean, at = performance.now(
   if (screen === 'play' && play) {
     if (code === 'Escape' && down) {
       if (play.mode === 'record') { finish(); return; }
-      if (!play.paused) { play.paused = true; pausedAt = performance.now(); if (play.mode === 'own') synth.ctx.suspend(); else yt.pause(); }
-      else { play.paused = false; if (play.mode === 'own') synth.stop(); else yt.pause(); if (play.mode === 'own') screen = 'select'; else enterYt(R.mine); if (play.mode === 'own') synth.ctx.resume(); }
+      if (!play.paused) pauseGame(); else quitGame();
       return;
     }
     if (play.paused) {
-      if (code === 'Enter' && down) {
-        play.paused = false;
-        if (play.mode === 'own') synth.ctx.resume();
-        else if (play.leadUntil) play.leadUntil += performance.now() - pausedAt; // 세는 중이었으면 이어서 세기
-        else yt.player?.playVideo();
-      }
+      if (code === 'Enter' && down) resumeGame();
       return;
     }
     if (play.tap) { if (!repeat) { if (down) tapDownAt(play, code, at); else tapUp(play, code, at); } return; }
@@ -992,8 +1086,13 @@ function key(code: string, down: boolean, repeat: boolean, at = performance.now(
   const moveSfx = () => sfx.play('click-a', 0.3);
   switch (screen) {
     case 'title':
-      if (up || dn) { cursor = (cursor + 1) % 2; moveSfx(); }
-      if (ok) { synth.resume(); sfx.play('switch-a'); screen = cursor === 0 ? 'select' : 'settings'; cursor = 0; }
+      if (up) { cursor = (cursor + 2) % 3; moveSfx(); }
+      if (dn) { cursor = (cursor + 1) % 3; moveSfx(); }
+      if (ok) {
+        synth.resume();
+        if (cursor === 2) { toggleFs(); break; }
+        sfx.play('switch-a'); screen = cursor === 0 ? 'select' : 'settings'; cursor = 0;
+      }
       break;
     case 'select': {
       const n = entries().length;
@@ -1023,13 +1122,16 @@ function key(code: string, down: boolean, repeat: boolean, at = performance.now(
         if (cursor === 6) set.hitVol = Math.max(0.2, Math.min(1, Math.round((set.hitVol + d * 0.2) * 10) / 10));
         if (cursor === 7) set.meter = !set.meter;
         if (cursor === 8) set.noFail = !set.noFail;
+        if (cursor === 9) set.mobile = cycle(MOBILE, set.mobile, d);
+        if (cursor === 10) { set.vibrate = !set.vibrate; if (set.vibrate) navigator.vibrate?.(30); }
         saveJson('yj_settings', set);
         if (cursor === 5 || cursor === 6) synth.resume().then(() => synth.tick(set.hitSound, set.hitVol)); // 들어 보기
         else moveSfx();
       }
       if (ok && (cursor === 5 || cursor === 6)) synth.resume().then(() => synth.tick(set.hitSound, set.hitVol));
       if (ok && cursor === 4) startCalib();
-      if (back || (ok && cursor === 9)) { screen = 'title'; cursor = 1; settingsMsg = ''; }
+      if (ok && cursor >= 7 && cursor <= 10) key('ArrowRight', true, false);
+      if (back || (ok && cursor === 11)) { screen = 'title'; cursor = 1; settingsMsg = ''; }
       break;
     }
     case 'yt': {
@@ -1111,27 +1213,45 @@ window.addEventListener('keyup', (e) => key(e.code, false, false, e.timeStamp));
 // 손가락: 판 위를 누르면 그 칸
 function lanesX(p: Play): [number, number] { return [fieldX(p), laneW(p.chart.lanes)]; }
 const touchLane = new Map<number, number>();
-cv.addEventListener('pointerdown', (e) => {
+function pos(e: PointerEvent): [number, number] {
   const r = cv.getBoundingClientRect();
-  const x = ((e.clientX - r.left) / r.width) * W;
+  return [((e.clientX - r.left) / r.width) * W, ((e.clientY - r.top) / r.height) * H];
+}
+function hitAt(x: number, y: number) { return hits.find((b) => x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h); }
+let downHit: { id: number; x: number; y: number } | null = null;
+cv.addEventListener('pointerdown', (e) => {
+  const [x, y] = pos(e);
+  // 하는 중: 누르는 즉시 (손가락을 떼기 전에) 판정
   if (screen === 'play' && play && !play.paused) {
-    if (play.tap) { tapDownAt(play, 'p' + e.pointerId, e.timeStamp); return; }
+    const h = hitAt(x, y);
+    if (h && h.act) { downHit = { id: e.pointerId, x, y }; return; }
+    if (play.tap) { tapDownAt(play, 'p' + e.pointerId, e.timeStamp); buzz(10); return; }
     const [x0, lw] = lanesX(play);
     const lane = Math.floor((x - x0) / lw);
-    if (lane >= 0 && lane < play.chart.lanes) { touchLane.set(e.pointerId, lane); press(lane, e.timeStamp); if (e.pointerType === 'touch') navigator.vibrate?.(8); }
+    if (lane >= 0 && lane < play.chart.lanes) { touchLane.set(e.pointerId, lane); press(lane, e.timeStamp); buzz(12); }
     return;
   }
-  if (screen === 'calib') { calibTap(e.timeStamp); return; }
-  const y = ((e.clientY - r.top) / r.height) * H;
-  const h = hits.find((b) => x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h);
-  if (h) { cursor = h.i; key('Enter', true, false); return; }
-  if (screen !== 'yt') key('Enter', true, false);
+  if (screen === 'calib') { calibTap(e.timeStamp); buzz(10); return; }
+  // 메뉴는 손가락을 뗄 때 (휴대폰 브라우저는 그때만 소리·전체 화면을 허락한다)
+  downHit = { id: e.pointerId, x, y };
 });
-cv.addEventListener('pointerup', (e) => {
+function liftLane(e: PointerEvent): void {
   if (screen === 'play' && play && play.tap) { tapUp(play, 'p' + e.pointerId, e.timeStamp); return; }
   const lane = touchLane.get(e.pointerId);
   if (lane !== undefined && play) { release(lane, e.timeStamp); touchLane.delete(e.pointerId); }
+}
+cv.addEventListener('pointerup', (e) => {
+  synth.resume();
+  liftLane(e);
+  if (!downHit || downHit.id !== e.pointerId) return;
+  downHit = null;
+  const [x, y] = pos(e);
+  const h = hitAt(x, y);
+  if (!h) return;
+  if (h.act) h.act(); else { cursor = h.i; key('Enter', true, false); }
 });
+cv.addEventListener('pointercancel', (e) => { liftLane(e); downHit = null; });
+cv.addEventListener('contextmenu', (e) => e.preventDefault());
 
 // ── 반복 ──
 function frame(): void {
@@ -1147,6 +1267,11 @@ function frame(): void {
     case 'yt': drawYt(); break;
     case 'play': drawPlay(); break;
     case 'result': drawResult(); break;
+  }
+  if (performance.now() - toastAt < 4000) {
+    g.font = '14px Galmuri'; const tw = Math.min(W - 40, g.measureText(toast).width + 40);
+    g.fillStyle = 'rgba(10,8,20,0.92)'; g.beginPath(); g.roundRect(W / 2 - tw / 2, H - 60, tw, 40, 10); g.fill();
+    text(fit2(toast, tw - 30, 14), W / 2, H - 40, 14, '#ffd75a', 'center');
   }
   requestAnimationFrame(frame);
 }
