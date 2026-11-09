@@ -15,7 +15,10 @@ export function fromSong(song: Song, lanes: number, level: Level): Chart {
   const pick: Ev[] = [];
   const index = new Map<Ev, number>();
   song.events.forEach((e, i) => index.set(e, i));
+  // 드럼이 없는 곡(클래식): 어려움에서는 피아노 왼손의 마디 첫 음(vel 1)을 노트로 더한다
+  const drumless = !song.events.some((e) => e.part === 'kick');
   for (const e of song.events) {
+    if (e.part === 'keys') { if (drumless && level === 'hard' && e.vel >= 1) pick.push(e); continue; }
     if (e.part === 'lead') {
       if (level === 'easy' && Math.abs(e.t * 2 - Math.round(e.t * 2)) > 1e-6) continue; // 반 박에 걸친 것만
       pick.push(e);
@@ -31,7 +34,7 @@ export function fromSong(song: Song, lanes: number, level: Level): Chart {
   for (const e of pick) {
     let lane: number;
     if (e.part === 'lead') lane = Math.round(((e.pitch - lo) / Math.max(1, hi - lo)) * (lanes - 1));
-    else if (e.part === 'kick') lane = lanes === 7 ? 3 : 0;
+    else if (e.part === 'kick' || e.part === 'keys') lane = lanes === 7 ? 3 : 0;
     else lane = lanes === 7 ? 6 : lanes - 1;
     const t = e.t * spb;
     // 같은 때 같은 칸이면 버림, 너무 가까우면 옆 칸

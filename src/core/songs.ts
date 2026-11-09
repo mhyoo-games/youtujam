@@ -3,10 +3,12 @@ import { build, type Song } from './music.ts';
 
 const C = (s: string) => s.split(' ');
 
-function song(id: string, title: string, bpm: number, genre: string, lead: Song['lead'], color: string, parts: Parameters<typeof build>[0]): Song {
+function song(id: string, title: string, bpm: number, genre: string, lead: Song['lead'], color: string, parts: Parameters<typeof build>[0], artist = '유튜잼 자체곡', preview?: number): Song {
   const { events, beats } = build(parts);
-  return { id, title, artist: '유튜잼 자체곡', bpm, genre, lead, color, events, beats };
+  return { id, title, artist, bpm, genre, lead, color, events, beats, preview };
 }
+// 화음: 첫 음이 베이스, 나머지가 위 (피아노 반주는 이 순서로 펼친다)
+const K = (s: string) => s.split(' ');
 
 export const SONGS: Song[] = [
   song('breeze', '첫바람', 120, '팝', 'square', '#4fb0ff', [
@@ -48,6 +50,84 @@ export const SONGS: Song[] = [
     { bars: 4, melody: 'E6:.5 B5:.5 G5:.5 E5:.5 B5:.5 G5:.5 E5:.5 B4:.5 E5:4 -:4 -:4',
       chords: [C('E2 E3 G3 B3'), C('C3 C4 E4 G4'), C('D3 D4 F#4 A4'), C('E2 E3 G3 B3')], drums: 'k.k.s...k.k.s.ss' },
   ]),
+
+  // ── 클래식 (작곡가 사후 70년이 지나 저작권이 끝난 곡). 멜로디를 리듬 게임용으로 짧게 줄여 새로 편곡 ──
+
+  // 쇼팽, 즉흥환상곡 Op.66 (1834): 빠른 16분음표 오른손 + 가운데 느리고 노래하는 부분
+  song('impromptu', '즉흥환상곡', 92, '클래식 · 피아노', 'piano', '#b48cff', [
+    { bars: 1, melody: '-:3 G#4:1', chords: [K('C#2 G#2 C#3 E3')], drums: '', acc: 'broken3' },
+    { bars: 8, melody:
+      'G#4:.25 A4:.25 G#4:.25 G4:.25 G#4:.25 C#5:.25 E5:.25 D#5:.25 C#5:.25 D#5:.25 C#5:.25 C5:.25 C#5:.25 E5:.25 G#5:.25 A5:.25 ' +
+      'G#5:.25 A5:.25 G#5:.25 G5:.25 G#5:.25 E5:.25 C#5:.25 G#4:.25 A4:.25 G#4:.25 G4:.25 G#4:.25 E4:.25 C#4:.25 E4:.25 G#4:.25 ' +
+      'A4:.25 B4:.25 A4:.25 G#4:.25 A4:.25 C#5:.25 F#5:.25 E5:.25 D#5:.25 E5:.25 D#5:.25 D5:.25 D#5:.25 F#5:.25 A5:.25 B5:.25 ' +
+      'G#5:.25 F#5:.25 E5:.25 D#5:.25 C5:.25 D#5:.25 F#5:.25 G#5:.25 F#5:.25 E5:.25 D#5:.25 C#5:.25 C5:.25 G#4:.25 A4:.25 C5:.25',
+      chords: [K('C#2 G#2 C#3 E3'), K('C#2 G#2 C#3 E3'), K('F#1 C#2 F#2 A2'), K('G#1 D#2 G#2 C3'), K('C#2 G#2 C#3 E3'), K('A1 E2 A2 C#3'), K('G#1 D#2 G#2 C3'), K('C#2 G#2 C#3 E3')], drums: '', acc: 'broken3' },
+    { bars: 8, melody: 'F5:1.5 Eb5:.5 Db5:1 C5:1 Db5:1.5 Eb5:.5 F5:1 Ab5:1 Gb5:1.5 F5:.5 Eb5:1 Db5:1 C5:3 -:1 Bb4:1.5 C5:.5 Db5:1 Eb5:1 F5:1.5 Gb5:.5 Ab5:1 F5:1 Eb5:1 Db5:1 C5:1 Eb5:1 Db5:4',
+      chords: [K('Db2 Ab2 Db3 F3'), K('Bb1 F2 Bb2 Db3'), K('Gb1 Db2 Gb2 Bb2'), K('Ab1 Eb2 Gb2 C3'), K('Bb1 F2 Bb2 Db3'), K('F1 C2 F2 Ab2'), K('Ab1 Eb2 Gb2 C3'), K('Db2 Ab2 Db3 F3')], drums: '', acc: 'broken3' },
+    { bars: 8, melody:
+      'G#4:.25 A4:.25 G#4:.25 G4:.25 G#4:.25 C#5:.25 E5:.25 D#5:.25 C#5:.25 D#5:.25 C#5:.25 C5:.25 C#5:.25 E5:.25 G#5:.25 A5:.25 ' +
+      'G#5:.25 A5:.25 G#5:.25 G5:.25 G#5:.25 E5:.25 C#5:.25 G#4:.25 A4:.25 G#4:.25 G4:.25 G#4:.25 E4:.25 C#4:.25 E4:.25 G#4:.25 ' +
+      'A4:.25 B4:.25 A4:.25 G#4:.25 A4:.25 C#5:.25 F#5:.25 E5:.25 D#5:.25 E5:.25 D#5:.25 D5:.25 D#5:.25 F#5:.25 A5:.25 B5:.25 ' +
+      'G#5:.25 F#5:.25 E5:.25 D#5:.25 C5:.25 D#5:.25 F#5:.25 G#5:.25 F#5:.25 E5:.25 D#5:.25 C#5:.25 C5:.25 G#4:.25 A4:.25 C5:.25',
+      chords: [K('C#2 G#2 C#3 E3'), K('C#2 G#2 C#3 E3'), K('F#1 C#2 F#2 A2'), K('G#1 D#2 G#2 C3'), K('C#2 G#2 C#3 E3'), K('A1 E2 A2 C#3'), K('G#1 D#2 G#2 C3'), K('C#2 G#2 C#3 E3')], drums: '', acc: 'broken3' },
+    { bars: 2, melody: 'C#5:.25 E5:.25 G#5:.25 C#6:.25 E6:.25 G#6:.25 C#7:.5 -:2 C#5:4', chords: [K('C#2 G#2 C#3 E3')], drums: '', acc: 'broken3' },
+  ], '쇼팽 · 유튜잼 편곡', 4),
+
+  // 포레, 시칠리안느 Op.78 (1898): 8분의 6박자의 흔들리는 리듬 (점8분-16분-8분)
+  song('sicilienne', '시칠리안느', 58, '클래식 · 플루트', 'flute', '#7fd1c7', [
+    { bars: 1, melody: '-:4', chords: [K('G2 D3 G3 Bb3')], drums: '', acc: 'broken3' },
+    { bars: 4, melody: 'D5:1/2 Eb5:1/6 D5:1/3 C5:1/2 D5:1/6 C5:1/3 Bb4:1/2 C5:1/6 Bb4:1/3 A4:1 Bb4:1/2 C5:1/6 Bb4:1/3 A4:1/2 Bb4:1/6 A4:1/3 G4:1/2 A4:1/6 G4:1/3 F#4:1 G4:1/2 A4:1/6 Bb4:1/3 C5:1/2 D5:1/6 Eb5:1/3 D5:1 C5:2/3 Bb4:1/3 A4:2 G4:2',
+      chords: [K('G2 D3 G3 Bb3'), K('D2 A2 C3 F#3'), K('C2 G2 C3 Eb3'), K('D2 A2 C3 F#3')], drums: '', acc: 'broken3' },
+    { bars: 4, melody: 'D5:1/2 Eb5:1/6 D5:1/3 C5:1/2 D5:1/6 C5:1/3 Bb4:1/2 C5:1/6 Bb4:1/3 A4:1 Bb4:1/2 C5:1/6 Bb4:1/3 A4:1/2 Bb4:1/6 A4:1/3 G4:1/2 A4:1/6 G4:1/3 F#4:1 G4:1/2 A4:1/6 Bb4:1/3 C5:1/2 D5:1/6 Eb5:1/3 D5:1 C5:2/3 Bb4:1/3 A4:2 G4:2',
+      chords: [K('G2 D3 G3 Bb3'), K('D2 A2 C3 F#3'), K('C2 G2 C3 Eb3'), K('D2 A2 C3 F#3')], drums: '', acc: 'broken3' },
+    { bars: 4, melody: 'G5:1/2 F5:1/6 Eb5:1/3 D5:1/2 Eb5:1/6 F5:1/3 G5:1 Bb5:1 A5:1/2 G5:1/6 F5:1/3 Eb5:1/2 F5:1/6 G5:1/3 F5:2 G5:1/2 Ab5:1/6 G5:1/3 F5:1/2 G5:1/6 F5:1/3 Eb5:1/2 F5:1/6 Eb5:1/3 D5:1 C5:1/2 D5:1/6 Eb5:1/3 D5:1/2 C5:1/6 Bb4:1/3 A4:2',
+      chords: [K('Eb2 Bb2 Eb3 G3'), K('F2 C3 F3 A3'), K('C2 G2 C3 Eb3'), K('D2 A2 C3 F#3')], drums: '', acc: 'broken3' },
+    { bars: 4, melody: 'D5:1/2 Eb5:1/6 D5:1/3 C5:1/2 D5:1/6 C5:1/3 Bb4:1/2 C5:1/6 Bb4:1/3 A4:1 Bb4:1/2 C5:1/6 Bb4:1/3 A4:1/2 Bb4:1/6 A4:1/3 G4:1/2 A4:1/6 G4:1/3 F#4:1 G4:1/2 A4:1/6 Bb4:1/3 C5:1/2 D5:1/6 Eb5:1/3 D5:1 C5:2/3 Bb4:1/3 A4:2 G4:2',
+      chords: [K('G2 D3 G3 Bb3'), K('D2 A2 C3 F#3'), K('C2 G2 C3 Eb3'), K('D2 A2 C3 F#3')], drums: '', acc: 'broken3' },
+    { bars: 1, melody: 'G4:4', chords: [K('G2 D3 G3 Bb3')], drums: '', acc: 'broken3' },
+  ], '포레 · 유튜잼 편곡', 36),
+
+  // 오펜바흐, 호프만 이야기 중 뱃노래 (1881): 곤돌라가 흔들리듯 긴-짧은 셋잇단 리듬
+  song('barcarolle', '호프만의 뱃노래', 56, '클래식 · 오페라', 'triangle', '#f2a7c3', [
+    { bars: 1, melody: '-:4', chords: [K('D2 A2 D3 F#3')], drums: '', acc: 'broken3' },
+    { bars: 4, melody: 'A4:2/3 B4:1/3 A4:2/3 F#4:1/3 A4:2/3 B4:1/3 A4:1 A4:2/3 B4:1/3 A4:2/3 G4:1/3 F#4:2/3 G4:1/3 F#4:1 E4:2/3 F#4:1/3 E4:2/3 D4:1/3 E4:2/3 F#4:1/3 G4:1 F#4:2/3 G4:1/3 A4:2/3 B4:1/3 A4:2',
+      chords: [K('D2 A2 D3 F#3'), K('A1 E2 G2 C#3'), K('A1 E2 G2 C#3'), K('D2 A2 D3 F#3')], drums: '', acc: 'broken3' },
+    { bars: 4, melody: 'D5:2/3 C#5:1/3 B4:2/3 A4:1/3 B4:2/3 C#5:1/3 D5:1 E5:2/3 D5:1/3 C#5:2/3 B4:1/3 A4:2 B4:2/3 A4:1/3 G4:2/3 F#4:1/3 E4:2/3 F#4:1/3 G4:1 F#4:2 D4:2',
+      chords: [K('G1 D2 G2 B2'), K('A1 E2 G2 C#3'), K('E2 B2 E3 G3'), K('D2 A2 D3 F#3')], drums: '', acc: 'broken3' },
+    { bars: 4, melody: 'A4:2/3 B4:1/3 A4:2/3 F#4:1/3 A4:2/3 B4:1/3 A4:1 A4:2/3 B4:1/3 A4:2/3 G4:1/3 F#4:2/3 G4:1/3 F#4:1 E4:2/3 F#4:1/3 E4:2/3 D4:1/3 E4:2/3 F#4:1/3 G4:1 F#4:2/3 G4:1/3 A4:2/3 B4:1/3 A4:2',
+      chords: [K('D2 A2 D3 F#3'), K('A1 E2 G2 C#3'), K('A1 E2 G2 C#3'), K('D2 A2 D3 F#3')], drums: '', acc: 'broken3' },
+    { bars: 4, melody: 'D5:2/3 C#5:1/3 B4:2/3 A4:1/3 B4:2/3 C#5:1/3 D5:1 E5:2/3 D5:1/3 C#5:2/3 B4:1/3 A4:2 B4:2/3 A4:1/3 G4:2/3 F#4:1/3 E4:2/3 F#4:1/3 G4:1 F#4:2 D4:2',
+      chords: [K('G1 D2 G2 B2'), K('A1 E2 G2 C#3'), K('E2 B2 E3 G3'), K('D2 A2 D3 F#3')], drums: '', acc: 'broken3' },
+    { bars: 1, melody: 'D4:4', chords: [K('D2 A2 D3 F#3')], drums: '', acc: 'broken3' },
+  ], '오펜바흐 · 유튜잼 편곡', 20),
+
+  // 모차르트, 피아노 소나타 11번 3악장 '터키 행진곡' (1784): 꾸밈음 16분음표와 쿵-짝 왼손
+  song('turca', '터키 행진곡', 126, '클래식 · 피아노', 'piano', '#ffb35c', [
+    { bars: 4, melody: 'B4:.25 A4:.25 G#4:.25 A4:.25 C5:1 D5:.25 C5:.25 B4:.25 C5:.25 E5:1 F5:.25 E5:.25 D#5:.25 E5:.25 B5:.25 A5:.25 G#5:.25 A5:.25 B5:.25 A5:.25 G#5:.25 A5:.25 C6:1 A5:.5 C6:.5 B5:.5 A5:.5 G#5:.5 A5:.5 E5:.5 F5:.5 D5:.5 C5:.5 B4:.25 A4:.25 B4:.5 A4:2',
+      chords: [K('A2 E3 A3 C4'), K('A2 E3 A3 C4'), K('E2 E3 G#3 B3'), K('A2 E3 A3 C4')], drums: '', acc: 'march' },
+    { bars: 4, melody: 'B4:.25 A4:.25 G#4:.25 A4:.25 C5:1 D5:.25 C5:.25 B4:.25 C5:.25 E5:1 F5:.25 E5:.25 D#5:.25 E5:.25 B5:.25 A5:.25 G#5:.25 A5:.25 B5:.25 A5:.25 G#5:.25 A5:.25 C6:1 A5:.5 C6:.5 B5:.5 A5:.5 G#5:.5 A5:.5 E5:.5 F5:.5 D5:.5 C5:.5 B4:.25 A4:.25 B4:.5 A4:2',
+      chords: [K('A2 E3 A3 C4'), K('A2 E3 A3 C4'), K('E2 E3 G#3 B3'), K('A2 E3 A3 C4')], drums: '', acc: 'march' },
+    { bars: 4, melody: 'E5:.5 F5:.5 G5:.5 G5:.5 A5:.25 G5:.25 F5:.25 E5:.25 D5:1 E5:.5 F5:.5 G5:.5 G5:.5 A5:.25 G5:.25 F5:.25 E5:.25 D5:1 C5:.5 D5:.5 E5:.5 E5:.5 F5:.25 E5:.25 D5:.25 C5:.25 B4:1 B4:.25 A4:.25 G#4:.25 A4:.25 C5:.5 B4:.5 A4:2',
+      chords: [K('C3 E3 G3 C4'), K('G2 D3 G3 B3'), K('E2 E3 G#3 B3'), K('A2 E3 A3 C4')], drums: '', acc: 'march' },
+    { bars: 4, melody: 'B4:.25 A4:.25 G#4:.25 A4:.25 C5:1 D5:.25 C5:.25 B4:.25 C5:.25 E5:1 F5:.25 E5:.25 D#5:.25 E5:.25 B5:.25 A5:.25 G#5:.25 A5:.25 B5:.25 A5:.25 G#5:.25 A5:.25 C6:1 A5:.5 C6:.5 B5:.5 A5:.5 G#5:.5 A5:.5 E5:.5 F5:.5 D5:.5 C5:.5 B4:.25 A4:.25 B4:.5 A4:2',
+      chords: [K('A2 E3 A3 C4'), K('A2 E3 A3 C4'), K('E2 E3 G#3 B3'), K('A2 E3 A3 C4')], drums: '', acc: 'march' },
+    { bars: 8, melody: 'C#5:.5 D5:.5 E5:.5 E5:.5 F#5:.25 E5:.25 D5:.25 C#5:.25 B4:1 A4:.5 B4:.5 C#5:.5 C#5:.5 D5:.25 C#5:.25 B4:.25 A4:.25 G#4:1 C#5:.5 D5:.5 E5:.5 E5:.5 F#5:.25 E5:.25 D5:.25 C#5:.25 B4:.5 E5:.5 A4:.5 E5:.5 C#5:.5 E5:.5 A5:2',
+      chords: [K('A2 E3 A3 C#4'), K('E2 E3 G#3 B3'), K('A2 E3 A3 C#4'), K('A2 E3 A3 C#4')], drums: '', acc: 'march' },
+    { bars: 1, melody: 'A5:1 -:1 A4:2', chords: [K('A2 E3 A3 C#4')], drums: '', acc: 'march' },
+  ], '모차르트 · 유튜잼 편곡', 64),
+
+  // 그리그, 페르 귄트 중 '산왕의 궁전에서' (1875): 낮고 조용히 시작해 점점 빨라지는 곡 → 록 편곡
+  song('mountain', '산왕의 궁전에서', 136, '클래식 · 록 편곡', 'square', '#8fbf5a', [
+    { bars: 4, melody: 'B3:.5 C#4:.5 D4:.5 E4:.5 F#4:.5 D4:.5 F#4:1 F4:.5 C#4:.5 F4:1 E4:.5 C4:.5 E4:1 B3:.5 C#4:.5 D4:.5 E4:.5 F#4:.5 D4:.5 F#4:.5 B4:.5 A4:.5 F#4:.5 D4:.5 F#4:.5 A4:2',
+      chords: [K('B1 B2 D3 F#3'), K('C#2 G#2 C#3 F3'), K('B1 B2 D3 F#3'), K('D2 A2 D3 F#3')], drums: 'k.......k.......' },
+    { bars: 4, melody: 'B4:.5 C#5:.5 D5:.5 E5:.5 F#5:.5 D5:.5 F#5:1 F5:.5 C#5:.5 F5:1 E5:.5 C5:.5 E5:1 B4:.5 C#5:.5 D5:.5 E5:.5 F#5:.5 D5:.5 F#5:.5 B5:.5 A5:.5 F#5:.5 D5:.5 F#5:.5 A5:2',
+      chords: [K('B1 B2 D3 F#3'), K('C#2 G#2 C#3 F3'), K('B1 B2 D3 F#3'), K('D2 A2 D3 F#3')], drums: 'k...h...s...h...' },
+    { bars: 4, melody: 'F#5:.5 G#5:.5 A#5:.5 B5:.5 C#6:.5 A#5:.5 C#6:1 D6:.5 A#5:.5 D6:1 C#6:.5 A#5:.5 C#6:1 F#5:.5 G#5:.5 A#5:.5 B5:.5 C#6:.5 A#5:.5 C#6:.5 F#6:.5 E6:.5 C#6:.5 A#5:.5 C#6:.5 E6:2',
+      chords: [K('F#1 F#2 A#2 C#3'), K('F#1 F#2 A#2 C#3'), K('F#1 F#2 A#2 C#3'), K('F#1 F#2 A#2 E3')], drums: 'k.h.s.h.k.h.s.hs' },
+    { bars: 8, melody: 'B4:.25 C#5:.25 D5:.25 E5:.25 F#5:.25 D5:.25 F#5:.5 F5:.25 C#5:.25 F5:.5 E5:.25 C5:.25 E5:.5 B4:.25 C#5:.25 D5:.25 E5:.25 F#5:.25 D5:.25 F#5:.25 B5:.25 A5:.25 F#5:.25 D5:.25 F#5:.25 A5:1',
+      chords: [K('B1 B2 D3 F#3'), K('B1 B2 D3 F#3'), K('G1 G2 B2 D3'), K('F#1 F#2 A#2 C#3')], drums: 'kshskshskshsKshs', arp: true },
+    { bars: 2, melody: 'F#5:.5 -:.5 F#5:.5 -:.5 B4:2 B4:4', chords: [K('F#1 F#2 A#2 C#3'), K('B1 B2 D3 F#3')], drums: 'K...K...K...K...' },
+  ], '그리그 · 유튜잼 편곡', 48),
 ];
 
 export function songById(id: string): Song | undefined {

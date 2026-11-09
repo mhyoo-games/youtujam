@@ -8,7 +8,11 @@ import { Synth, Sfx } from './audio/synth.ts';
 import { YtClock } from './yt/youtube.ts';
 import * as Lib from './core/library.ts';
 
-const W = 960, H = 540;
+const W = 960, H = 540; // 메뉴 화면은 960×540 기준
+// 실제 화면 폭: 휴대폰 가로처럼 길쭉하면 넓혀서 꽉 채운다 (하는 중 화면은 VW를 다 쓴다)
+let VW = 960;
+/** 메뉴 화면을 가운데 두려고 미는 만큼 */
+let OX = 0;
 const cv = document.getElementById('c') as HTMLCanvasElement;
 // desynchronized: 화면에 그리는 지연을 줄인다 (지원하는 브라우저만)
 const g = (cv.getContext('2d', { desynchronized: true, alpha: false }) ?? cv.getContext('2d'))!;
@@ -19,16 +23,26 @@ const urlIn = document.getElementById('url') as HTMLInputElement;
 const fileIn = document.getElementById('file') as HTMLInputElement;
 
 // ── 화면 맞추기 (비율 유지, 창 가득) ──
+const stage = document.getElementById('stage')!;
+let SX = 1, SY = 1;
 function fit(): void {
-  const s = Math.min(window.innerWidth / W, window.innerHeight / H);
+  // 안전 영역(아이폰 노치·홈 막대)을 뺀 자리에 맞춘다
+  const r = stage.getBoundingClientRect();
+  const aw = Math.max(1, r.width), ah = Math.max(1, r.height);
+  VW = typeof phone === 'function' && phone() && aw / ah > W / H ? Math.min(1320, Math.round((H * aw) / ah)) : W;
+  const s = Math.min(aw / VW, ah / H);
   const dpr = window.devicePixelRatio || 1;
-  cv.width = Math.round(W * s * dpr); cv.height = Math.round(H * s * dpr);
-  g.setTransform(cv.width / W, 0, 0, cv.height / H, 0, 0);
+  cv.width = Math.round(VW * s * dpr); cv.height = Math.round(H * s * dpr);
+  cv.style.width = `${VW}px`; cv.style.height = `${H}px`;
+  wrap.style.width = `${VW}px`;
+  SX = cv.width / VW; SY = cv.height / H;
+  g.setTransform(SX, 0, 0, SY, 0, 0);
   wrap.style.transform = `translate(-50%, -50%) scale(${s})`;
   wrap.style.transformOrigin = 'center';
 }
 window.addEventListener('resize', fit);
-fit();
+window.visualViewport?.addEventListener('resize', fit);
+window.addEventListener('orientationchange', () => setTimeout(fit, 250));
 
 // ── 그림 (Kenney UI Pack, CC0) ──
 const IMG = new Map<string, HTMLImageElement>();
@@ -88,16 +102,26 @@ function buzz(ms: number): void { if (set.vibrate && phone()) navigator.vibrate?
 let toast = '', toastAt = -9999;
 function say(t: string): void { toast = t; toastAt = performance.now(); }
 function isFs(): boolean { return !!(document.fullscreenElement || (document as any).webkitFullscreenElement); }
+// 아이폰은 브라우저 전체 화면이 없다 → 홈 화면에 추가하면 앱처럼 꽉 찬 화면으로 열린다
+const isIOS = /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+const standalone = (navigator as any).standalone === true || matchMedia('(display-mode: standalone), (display-mode: fullscreen)').matches;
+function fsApi(): boolean { const el = document.documentElement as any; return !!(el.requestFullscreen || el.webkitRequestFullscreen); }
+/** 전체 화면 버튼을 보일지 (이미 홈 화면 앱이면 필요 없음) */
+function fsOffer(): boolean { return !standalone && (fsApi() || isIOS); }
+let iosGuide = false;
+// 아이폰 무음 모드에서도 소리가 나게 (지원하는 iOS만)
+try { const as = (navigator as any).audioSession; if (as) as.type = 'playback'; } catch { /* */ }
 function toggleFs(): void {
   const el = document.documentElement as any;
   if (isFs()) { (document.exitFullscreen ?? (document as any).webkitExitFullscreen)?.call(document); return; }
   const req = el.requestFullscreen ?? el.webkitRequestFullscreen;
-  if (!req) { say('이 기기는 전체 화면을 못 해요. 아이폰은 공유 → "홈 화면에 추가"로 열면 꽉 차요.'); return; }
+  if (!req) { if (isIOS) iosGuide = true; else say('이 기기는 전체 화면을 못 해요.'); return; }
   Promise.resolve(req.call(el, { navigationUI: 'hide' }))
     .then(() => (window.screen.orientation as any)?.lock?.('landscape').catch(() => {}))
     .catch(() => say('전체 화면을 켜지 못했어요. 한 번 더 눌러 보세요.'));
 }
 document.addEventListener('fullscreenchange', () => fit());
+fit();
 const best: Record<string, { score: number; rank: string }> = loadJson('yj_best', {});
 
 // ── 그리기 도우미 ──
@@ -129,11 +153,12 @@ let beatPulse = 0;
 function background(t: number, accent = '#4fb0ff'): void {
   const grd = g.createLinearGradient(0, 0, 0, H);
   grd.addColorStop(0, '#120f27'); grd.addColorStop(1, '#2a1640');
-  g.fillStyle = grd; g.fillRect(0, 0, W, H);
+  g.fillStyle = grd; g.fillRect(-OX, 0, VW, H);
   g.save();
   g.globalAlpha = 0.18 + beatPulse * 0.25;
-  for (let i = 0; i < 14; i++) {
-    const x = ((i * 90 + t * 40) % (W + 200)) - 100;
+  g.translate(-OX, 0);
+  for (let i = 0; i < Math.ceil((VW + 200) / 90) + 1; i++) {
+    const x = ((i * 90 + t * 40) % (VW + 290)) - 100;
     g.fillStyle = i % 2 ? accent : '#ffffff';
     g.beginPath(); g.moveTo(x, H); g.lineTo(x + 40, H); g.lineTo(x + 260, 0); g.lineTo(x + 220, 0); g.fill();
   }
@@ -175,7 +200,17 @@ function clock(perfMs = performance.now()): number {
 }
 
 /** 판의 왼쪽 끝: 자체곡은 왼쪽(오른쪽은 배경 영상), 유튜브는 영상 오른쪽 */
-function fieldX(_p: Play): number { return phone() ? 26 : 44; }
+/** 판 모양: 왼쪽 끝, 칸 너비, 판 너비, 판정선 높이, 누르는 칸 높이, 오른쪽 영상 자리 너비.
+ *  PC는 예전 그대로, 휴대폰은 판을 가로로 꽉 채우고 아래 누르는 칸을 크게 (유튜브는 오른쪽에 영상 자리) */
+interface Geo { x0: number; lw: number; fw: number; hitY: number; padH: number; side: number }
+function geo(p: Play): Geo {
+  const lanes = p.chart.lanes;
+  if (!phone()) { const lw = laneW(lanes); return { x0: 44, lw, fw: lw * lanes, hitY: 440, padH: 54, side: 0 }; }
+  const side = p.mode === 'own' ? 0 : Math.round(VW * 0.27);
+  const x0 = 12, fw = VW - 24 - (side ? side + 12 : 0);
+  return { x0, lw: fw / lanes, fw, hitY: 404, padH: H - 404 - 14, side };
+}
+function fieldX(p: Play): number { return geo(p).x0; }
 /** 판 오른쪽 정보 자리: [x, 너비, 배경 영상 높이] */
 function hud(p: Play): [number, number, number] {
   if (!phone()) return [470, 466, 300];
@@ -343,15 +378,17 @@ function bolt(x: number, y: number): void {
 }
 function field(p: Play, x0: number): void {
   const lanes = p.chart.lanes;
-  const lw = laneW(lanes);
-  const fw = lw * lanes;
-  const hitY = HIT_Y;
+  const G = geo(p), ph = phone();
+  const lw = G.lw, fw = G.fw, hitY = G.hitY;
   const now = clock();
   const pxs = 260 * set.speed; // 초당 픽셀
   const ms = performance.now();
   // 쇠틀과 검은 판
-  metal(x0 - 16, 0, 16, H); metal(x0 + fw, 0, 34, H);
-  for (const by of [40, 200, 360]) { bolt(x0 - 8, by); bolt(x0 + fw + 8, by); }
+  if (ph) { metal(x0 - 10, 0, 10, H); metal(x0 + fw, 0, 10, H); }
+  else {
+    metal(x0 - 16, 0, 16, H); metal(x0 + fw, 0, 34, H);
+    for (const by of [40, 200, 360]) { bolt(x0 - 8, by); bolt(x0 + fw + 8, by); }
+  }
   g.fillStyle = '#05040b'; g.fillRect(x0, 0, fw, hitY);
   for (let i = 0; i < lanes; i++) {
     const x = x0 + i * lw;
@@ -403,41 +440,45 @@ function field(p: Play, x0: number): void {
   g.fillStyle = lg; g.fillRect(x0, hitY - 6, fw, 12);
   g.fillStyle = '#fff'; g.fillRect(x0, hitY - 1, fw, 2);
   // 건반 받침 (기어)
-  metal(x0 - 16, hitY + 6, fw + 50, H - hitY - 6);
-  g.fillStyle = '#12131c'; g.fillRect(x0, hitY + 8, fw, 70);
+  if (ph) { metal(x0 - 10, hitY + 6, fw + 20, H - hitY - 6); g.fillStyle = '#12131c'; g.fillRect(x0, hitY + 6, fw, H - hitY - 10); }
+  else { metal(x0 - 16, hitY + 6, fw + 50, H - hitY - 6); g.fillStyle = '#12131c'; g.fillRect(x0, hitY + 8, fw, 70); }
   for (let i = 0; i < lanes; i++) {
     const x = x0 + i * lw;
     const col = LANE_COLOR[lanes][i];
     const dn = p.held[i];
+    const py = hitY + (ph ? 8 : 12) + (dn ? 3 : 0), pw = lw - (ph ? 4 : 6), pad = G.padH - (dn ? 3 : 0);
     g.globalAlpha = dn ? 1 : 0.7;
-    nine(img(`${KEY_SPRITE[col]}_button_square_depth_gloss`), x + 3, hitY + 12 + (dn ? 3 : 0), lw - 6, 54 - (dn ? 3 : 0), 14);
+    nine(img(`${KEY_SPRITE[col]}_button_square_depth_gloss`), x + (ph ? 2 : 3), py, pw, pad, 14);
     g.globalAlpha = 1;
-    text(keyName(lanes, i), x + lw / 2, hitY + 37 + (dn ? 2 : 0), 15, dn ? '#fff' : '#e4e7f5', 'center', 'KFuture');
+    if (!ph) text(keyName(lanes, i), x + lw / 2, hitY + 37 + (dn ? 2 : 0), 15, dn ? '#fff' : '#e4e7f5', 'center', 'KFuture');
   }
-  // 잼 게이지 (아래)
-  const jy = hitY + 84;
-  g.fillStyle = '#05040b'; g.fillRect(x0, jy, fw, 12);
-  const jg = g.createLinearGradient(x0, 0, x0 + fw, 0);
+  // 잼 게이지 (PC는 아래, 휴대폰은 위 띠에)
+  const jy = ph ? 30 : hitY + 84;
+  const bw = ph ? fw - 96 : fw; // 휴대폰은 오른쪽 위에 멈춤 버튼 자리
+  g.fillStyle = '#05040b'; g.fillRect(x0, jy, bw, 12);
+  const jg = g.createLinearGradient(x0, 0, x0 + bw, 0);
   jg.addColorStop(0, '#ff4fa8'); jg.addColorStop(0.5, '#ffd75a'); jg.addColorStop(1, '#4fe0ff');
-  g.fillStyle = jg; g.fillRect(x0 + 1, jy + 1, (fw - 2) * Math.min(1, p.tally.jam / 100), 10);
-  for (let k = 1; k < 10; k++) { g.fillStyle = 'rgba(0,0,0,0.5)'; g.fillRect(x0 + (fw * k) / 10, jy + 1, 1, 10); }
+  g.fillStyle = jg; g.fillRect(x0 + 1, jy + 1, (bw - 2) * Math.min(1, p.tally.jam / 100), 10);
+  for (let k = 1; k < 10; k++) { g.fillStyle = 'rgba(0,0,0,0.5)'; g.fillRect(x0 + (bw * k) / 10, jy + 1, 1, 10); }
   if (x0 >= 40) text('JAM', x0 - 8, jy + 6, 9, '#ffd75a', 'right', 'KFuture');
+  else text('JAM', x0 + 6, jy + 6, 9, '#ffffff', 'left', 'KFuture');
   // 판정선 불꽃
   g.save(); g.globalCompositeOperation = 'lighter';
   p.bursts = p.bursts.filter((f) => ms - f.at < 240);
   // 판정이 좋을수록 크게: PERFECT는 하얀 고리까지
   for (const f of p.bursts) {
     const k = (ms - f.at) / 240, cx = x0 + f.lane * lw + lw / 2;
-    const size = f.g === 'PERFECT' ? lw * 1.15 : f.g === 'GREAT' ? lw * 0.85 : lw * 0.55;
+    const bl = Math.min(lw, 96); // 휴대폰의 넓은 칸에서도 불꽃이 화면을 덮지 않게
+    const size = f.g === 'PERFECT' ? bl * 1.15 : f.g === 'GREAT' ? bl * 0.85 : bl * 0.55;
     burst(cx, hitY, k, f.g === 'PERFECT' ? '#ffe36b' : HEX[LANE_COLOR[lanes][f.lane]], size);
-    if (f.g === 'PERFECT' && k < 0.6) { g.strokeStyle = `rgba(255,255,255,${0.9 - k * 1.5})`; g.lineWidth = 3; g.beginPath(); g.ellipse(cx, hitY, lw * (0.3 + k), lw * (0.15 + k * 0.4), 0, 0, Math.PI * 2); g.stroke(); }
+    if (f.g === 'PERFECT' && k < 0.6) { g.strokeStyle = `rgba(255,255,255,${0.9 - k * 1.5})`; g.lineWidth = 3; g.beginPath(); g.ellipse(cx, hitY, bl * (0.3 + k), bl * (0.15 + k * 0.4), 0, 0, Math.PI * 2); g.stroke(); }
   }
   // 누른 칸의 판정선이 번쩍 (노트가 없어도)
   for (let i = 0; i < lanes; i++) {
     const k = (ms - p.pressAt[i]) / 120;
     if (k < 1) { g.fillStyle = `rgba(255,255,255,${0.8 * (1 - k)})`; g.fillRect(x0 + i * lw + 2, hitY - 4, lw - 4, 8); }
   }
-  for (const n of p.notes) if (n.holding && ms % 90 < 45) burst(x0 + n.lane * lw + lw / 2, hitY, 0.3, HEX[LANE_COLOR[lanes][n.lane]], lw * 0.8);
+  for (const n of p.notes) if (n.holding && ms % 90 < 45) burst(x0 + n.lane * lw + lw / 2, hitY, 0.3, HEX[LANE_COLOR[lanes][n.lane]], Math.min(lw, 96) * 0.8);
   g.restore();
   p.flashes = p.flashes.filter((f) => ms - f.at < 200);
   for (const f of p.flashes) {
@@ -448,7 +489,18 @@ function field(p: Play, x0: number): void {
     if (st.complete) g.drawImage(st, x0 + f.lane * lw + lw / 2 - sz / 2, hitY - 30 - k * 30 - sz / 2, sz, sz);
     g.globalAlpha = 1;
   }
-  // 체력 (칸 나뉜 세로 막대, 오른쪽 쇠틀 안)
+  // 체력: PC는 오른쪽 쇠틀 안 세로 막대, 휴대폰은 위 띠의 가로 막대
+  if (ph) {
+    const seg = 30, sw = bw / seg, lit = Math.ceil((p.tally.life / 100) * seg);
+    g.fillStyle = 'rgba(5,4,11,0.85)'; g.fillRect(x0, 0, fw, 29);
+    for (let k = 0; k < seg; k++) {
+      const on = k < lit;
+      g.fillStyle = on ? (k < 6 ? '#ff4f5e' : k < 14 ? '#ffd75a' : '#4fe08a') : '#1b1d28';
+      if (on && lit <= 6 && ms % 400 < 200) g.fillStyle = '#ff9aa6';
+      g.fillRect(x0 + k * sw + 1, 20, sw - 2, 6);
+    }
+  } else drawHpBar();
+  function drawHpBar(): void {
   const lx = x0 + fw + 12, top = 60, seg = 24, sh = (hitY - top - 20) / seg;
   g.fillStyle = '#05040b'; g.fillRect(lx - 2, top - 2, 14, sh * seg + 4);
   const lit = Math.ceil((p.tally.life / 100) * seg);
@@ -460,6 +512,7 @@ function field(p: Play, x0: number): void {
     g.fillRect(lx, y + 1, 10, sh - 2);
   }
   text('HP', lx + 5, top - 14, 10, '#e4e7f5', 'center', 'KFuture');
+  }
   // 판정·콤보·잼
   const cx = x0 + fw / 2;
   const since = (ms - p.gradeAt) / 1000;
@@ -471,7 +524,7 @@ function field(p: Play, x0: number): void {
     const tm = p.lastGrade !== 'MISS' ? earlyLate(p.lastDiff) : null;
     if (set.meter && tm) text(`${tm} ${p.lastDiff > 0 ? '+' : ''}${Math.round(p.lastDiff * 1000)}ms`, cx, 326, 13, tm === 'FAST' ? '#6bd0ff' : '#ff9a6b', 'center', 'GalmuriB');
   }
-  if (set.meter) errorMeter(p, x0, fw, hitY + 70);
+  if (set.meter) errorMeter(p, x0, fw, ph ? hitY - 30 : hitY + 70);
   if (p.tally.jamCombo > 0) {
     const js = (ms - p.jamAt) / 1000;
     const pop = js < 0.3 ? 1 + (0.3 - js) * 1.5 : 1;
@@ -582,57 +635,100 @@ function drawPlay(): void {
   background(performance.now() / 1000, p.song ? p.song.color : '#ff5a6e');
   const x0 = fieldX(p);
   field(p, x0);
-  // 오른쪽(자체곡) 또는 영상 아래(유튜브)에 곡 정보·점수
   const own = p.mode === 'own';
-  const [hx, hw, bh] = hud(p);
-  const ph = phone();
+  const ph = phone(), G = geo(p);
   const lv = levelNumber(p.chart, p.length);
   const info = p.mode === 'record' ? (p.tap ? '리듬 녹음' : `${p.chart.lanes}K  녹음`) : `${p.chart.lanes}K  ${LEVEL_KO[p.chart.level]}  Lv.${lv}  ×${set.speed.toFixed(1)}`;
-  if (own) {
-    bga(p, hx, 64, hw, bh);
-    text(fit2(p.title, ph ? hw : hw - 180, 20), hx, 24, 20, '#fff', 'left', 'GalmuriB');
-    text(ph ? info : `${p.song!.artist} · BPM ${p.song!.bpm}`, hx, 48, 12, ph ? '#ffd75a' : '#cfd3ea');
-  } else {
-    placeYt(hx, 64, hw, ph ? bh : 262);
-    text(fit2(p.title, ph ? hw : hw - 160, 16), hx, 24, 16, '#fff', 'left', 'GalmuriB');
-    const c = p.chartId ? Lib.chartsFor(Lib.find(lib, p.ytId!), p.chart.lanes).find((x) => x.id === p.chartId) : undefined;
-    const sub = p.mode === 'record' ? (p.tap ? (ph ? '● 리듬 녹음 — 노트 자리마다 아무 데나 톡' : '● 리듬 녹음 중 — 노트가 나올 때마다 아무 키나 · 길게=길게 · Esc 저장') : (ph ? '● 녹음 중' : '● 녹음 중 — 노래에 맞춰 건반을 치세요 · Esc 끝내고 저장')) : (c ? `유튜브 · 내 ${c.name}` : '유튜브 · 박자 채보') + (ph ? `  ${info}` : '');
-    text(fit2(sub, hw, 12), hx, 48, 12, p.mode === 'record' ? '#ff8a8a' : '#cfd3ea');
-  }
-  if (!ph) text(info, hx + hw, 24, 13, '#ffd75a', 'right');
-  const sy = ph ? 64 + bh + 14 : 392;
-  nine(img('grey_button_rectangle_depth_flat'), hx, sy, hw, 120, 16);
-  text('SCORE', hx + 20, sy + 26, 12, '#4a4466', 'left', 'KFuture');
-  text(String(p.tally.score).padStart(7, '0'), hx + hw - 20, sy + 30, 30, '#2a2440', 'right', 'KFuture');
-  if (p.mode !== 'record') text(fit2(`정확도 ${accuracy(p.tally).toFixed(1)}%   최대 콤보 ${p.tally.maxCombo}   JAM ${p.tally.jamCombo}`, hw - 40, 13), hx + 20, sy + 66, 13, '#2a2440');
+  const c = p.chartId ? Lib.chartsFor(Lib.find(lib, p.ytId!), p.chart.lanes).find((x) => x.id === p.chartId) : undefined;
   const prog = Math.max(0, Math.min(1, now / p.length));
-  g.fillStyle = '#b9bdd3'; g.fillRect(hx + 20, sy + 88, hw - 40, 8);
-  g.fillStyle = '#ff4fa8'; g.fillRect(hx + 20, sy + 88, (hw - 40) * prog, 8);
-  if (p.mode === 'record') text(`${p.tap ? '친 박자' : '친 노트'} ${p.rec.length + p.tapDown.size}`, hx + 20, sy + 66, 13, '#c0303f');
-  if (now < 0) text(String(Math.ceil(-now)), x0 + (p.chart.lanes * laneW(p.chart.lanes)) / 2, 150, 64, '#ffd75a', 'center', 'KFuture');
-  // 손가락용 멈춤(녹음 중엔 끝내고 저장) 버튼
-  if (ph || coarse) {
-    const by = ph ? Math.min(H - 64, sy + 134) : 20, bx = ph ? hx : W - 150, bw = ph ? hw : 130;
-    button(p.mode === 'record' ? '■ 끝내고 저장' : 'Ⅱ 멈춤', bx, by, bw, ph ? 52 : 36, false, p.mode === 'record' ? 'red' : 'grey');
-    hitAct(bx, by, bw, ph ? 52 : 36, () => (p.mode === 'record' ? finish() : pauseGame()));
+  const rec = p.mode === 'record';
+  if (ph) {
+    // ── 휴대폰: 판 위쪽 띠에 제목·점수, 오른쪽 위 멈춤. 유튜브는 오른쪽에 영상과 점수 ──
+    const right = x0 + G.fw;
+    g.fillStyle = '#ff4fa8'; g.fillRect(x0, 44, (G.fw - 96) * prog, 2);
+    if (own) text(fit2(`${p.title}  ${info}`, G.fw - 260, 13), x0 + 8, 10, 13, '#fff');
+    else text(fit2(rec ? (p.tap ? '● 리듬 녹음 — 노트 자리마다 아무 데나 톡' : '● 녹음 중') : info, G.fw - 260, 12), x0 + 8, 10, 12, rec ? '#ff8a8a' : '#ffd75a');
+    text(rec ? `${p.rec.length + p.tapDown.size}` : String(p.tally.score).padStart(7, '0'), right - 104, 11, 15, '#fff', 'right', 'KFuture');
+    button(rec ? '■ 저장' : 'Ⅱ', right - 92, 2, 90, 42, false, rec ? 'red' : 'grey');
+    hitAct(right - 92, 0, 92, 48, () => (rec ? finish() : pauseGame()));
+    if (G.side) {
+      const sx = right + 12, sw = G.side, vh = Math.round((sw * 9) / 16);
+      placeYt(sx, 10, sw, vh);
+      text(fit2(p.title, sw, 14), sx, vh + 26, 14, '#fff', 'left', 'GalmuriB');
+      text(fit2(rec ? (p.tap ? '박자만 치면 칸은 자동' : '건반을 직접 쳐서 녹음') : c ? `내 ${c.name}` : '박자 채보', sw, 12), sx, vh + 46, 12, '#cfd3ea');
+      nine(img('grey_button_rectangle_depth_flat'), sx, vh + 62, sw, 96, 14);
+      text('SCORE', sx + 12, vh + 82, 11, '#4a4466', 'left', 'KFuture');
+      text(String(p.tally.score).padStart(7, '0'), sx + sw - 12, vh + 84, 20, '#2a2440', 'right', 'KFuture');
+      text(rec ? `${p.tap ? '친 박자' : '친 노트'} ${p.rec.length + p.tapDown.size}` : fit2(`정확도 ${accuracy(p.tally).toFixed(1)}%  콤보 ${p.tally.maxCombo}`, sw - 24, 12), sx + 12, vh + 112, 12, rec ? '#c0303f' : '#2a2440');
+      g.fillStyle = '#b9bdd3'; g.fillRect(sx + 12, vh + 132, sw - 24, 6);
+      g.fillStyle = '#ff4fa8'; g.fillRect(sx + 12, vh + 132, (sw - 24) * prog, 6);
+    }
+  } else {
+    // ── PC: 오른쪽에 배경 무대(자체곡) 또는 영상(유튜브)과 점수 ──
+    const [hx, hw, bh] = hud(p);
+    if (own) {
+      bga(p, hx, 64, hw, bh);
+      text(fit2(p.title, hw - 180, 20), hx, 24, 20, '#fff', 'left', 'GalmuriB');
+      text(`${p.song!.artist} · BPM ${p.song!.bpm}`, hx, 48, 12, '#cfd3ea');
+    } else {
+      placeYt(hx, 64, hw, 262);
+      text(fit2(p.title, hw - 160, 16), hx, 24, 16, '#fff', 'left', 'GalmuriB');
+      const sub = rec ? (p.tap ? '● 리듬 녹음 중 — 노트가 나올 때마다 아무 키나 · 길게=길게 · Esc 저장' : '● 녹음 중 — 노래에 맞춰 건반을 치세요 · Esc 끝내고 저장') : c ? `유튜브 · 내 ${c.name}` : '유튜브 · 박자 채보';
+      text(fit2(sub, hw, 12), hx, 48, 12, rec ? '#ff8a8a' : '#cfd3ea');
+    }
+    text(info, hx + hw, 24, 13, '#ffd75a', 'right');
+    const sy = 392;
+    nine(img('grey_button_rectangle_depth_flat'), hx, sy, hw, 120, 16);
+    text('SCORE', hx + 20, sy + 26, 12, '#4a4466', 'left', 'KFuture');
+    text(String(p.tally.score).padStart(7, '0'), hx + hw - 20, sy + 30, 30, '#2a2440', 'right', 'KFuture');
+    if (!rec) text(fit2(`정확도 ${accuracy(p.tally).toFixed(1)}%   최대 콤보 ${p.tally.maxCombo}   JAM ${p.tally.jamCombo}`, hw - 40, 13), hx + 20, sy + 66, 13, '#2a2440');
+    g.fillStyle = '#b9bdd3'; g.fillRect(hx + 20, sy + 88, hw - 40, 8);
+    g.fillStyle = '#ff4fa8'; g.fillRect(hx + 20, sy + 88, (hw - 40) * prog, 8);
+    if (rec) text(`${p.tap ? '친 박자' : '친 노트'} ${p.rec.length + p.tapDown.size}`, hx + 20, sy + 66, 13, '#c0303f');
+    if (coarse) {
+      button(rec ? '■ 끝내고 저장' : 'Ⅱ 멈춤', W - 150, 20, 130, 36, false, rec ? 'red' : 'grey');
+      hitAct(W - 150, 20, 130, 36, () => (rec ? finish() : pauseGame()));
+    }
   }
+  if (now < 0) text(String(Math.ceil(-now)), x0 + G.fw / 2, 150, 64, '#ffd75a', 'center', 'KFuture');
   if (p.paused) {
-    g.fillStyle = 'rgba(0,0,0,0.65)'; g.fillRect(0, 0, W, H);
-    text('잠깐 멈춤', W / 2, 140, 32, '#fff', 'center', 'GalmuriB');
-    const items: Array<[string, () => void, string]> = [['계속하기 (Enter)', resumeGame, 'blue'], ['그만두기 (Esc)', quitGame, 'red'], [isFs() ? '전체 화면 끄기' : '전체 화면', toggleFs, 'grey']];
-    items.forEach(([label, act, col], i) => { const y = 190 + i * 76; button(label, W / 2 - 150, y, 300, 60, false, col); hitAct(W / 2 - 150, y, 300, 60, act); });
+    g.fillStyle = 'rgba(0,0,0,0.65)'; g.fillRect(0, 0, VW, H);
+    text('잠깐 멈춤', VW / 2, 140, 32, '#fff', 'center', 'GalmuriB');
+    const items: Array<[string, () => void, string]> = [['계속하기 (Enter)', resumeGame, 'blue'], ['그만두기 (Esc)', quitGame, 'red']];
+    if (fsOffer()) items.push([isFs() ? '전체 화면 끄기' : '전체 화면', toggleFs, 'grey']);
+    items.forEach(([label, act, col], i) => { const y = 190 + i * 76; button(label, VW / 2 - 150, y, 300, 60, false, col); hitAct(VW / 2 - 150, y, 300, 60, act); });
   }
 }
 
+function titleItems(): string[] {
+  const it = ['곡 고르기', '설정'];
+  if (fsOffer()) it.push(isFs() ? '전체 화면 끄기' : isIOS && !fsApi() ? '전체 화면 (아이폰)' : '전체 화면');
+  return it;
+}
+/** 아이폰: 홈 화면에 추가하는 법 */
+function drawIosGuide(): void {
+  const cx = VW / 2 - OX;
+  g.fillStyle = 'rgba(5,4,12,0.82)'; g.fillRect(-OX, 0, VW, H);
+  nine(img('grey_button_rectangle_depth_flat'), cx - 300, 70, 600, 400, 18);
+  text('아이폰에서 꽉 찬 화면으로 하기', cx, 110, 22, '#2a2440', 'center', 'GalmuriB');
+  text('아이폰 사파리는 웹페이지 전체 화면을 지원하지 않아요.', cx, 148, 14, '#4a4466', 'center');
+  text('대신 홈 화면에 추가하면 주소창 없이 앱처럼 열려요.', cx, 170, 14, '#4a4466', 'center');
+  const steps = ['① 사파리의 공유 버튼(네모에 ↑)을 누르기', '② 목록에서 "홈 화면에 추가" 고르기', '③ 홈 화면에 생긴 유튜잼 아이콘으로 열기', '④ 휴대폰을 가로로 돌리면 끝!'];
+  steps.forEach((t, i) => text(t, cx - 230, 222 + i * 40, 17, '#2a2440'));
+  button('알겠어요', cx - 100, 396, 200, 52, true);
+  hitAct(-OX, 0, VW, H, () => { iosGuide = false; });
+}
 function drawTitle(): void {
   background(performance.now() / 1000);
   text('유튜잼', W / 2, 150, 72, '#ffd75a', 'center', 'GalmuriB');
   text('YOUTUJAM', W / 2, 205, 22, '#cfd3ea', 'center', 'KFuture');
-  const items = ['곡 고르기', '설정', isFs() ? '전체 화면 끄기' : '전체 화면'];
+  const items = titleItems();
   items.forEach((s, i) => { button(s, W / 2 - 120, 260 + i * 66, 240, 54, cursor === i); hitRow(i, W / 2 - 120, 260 + i * 66, 240, 54); });
   text('↑↓ 고르기 · Enter 결정 · 4건반 D F J K · 5건반 D F ␣ J K · 6건반 S D F J K L · 7건반 S D F ␣ J K L', W / 2, 500, 12, '#a9a4c8', 'center');
 }
 
+let selTop = 0;
+const SEL_SHOW = 5;
 const lvCache = new Map<string, Record<Level, number>>();
 function levelsOf(song: Song): Record<Level, number> {
   const k = `${song.id}_${set.lanes}`;
@@ -652,7 +748,7 @@ function preview(): void {
   if (!e || !e.song) { if (previewId) { previewId = ''; synth.stop(); } return; }
   if (synth.ctx.state !== 'running') return;
   if (previewId !== e.song.id || !synth.playing()) {
-    const from = Math.min(48, Math.floor(e.song.beats / 2));
+    const from = e.song.preview ?? Math.min(48, Math.floor(e.song.beats / 2));
     synth.play(e.song, 0.25, { from, until: from + 32, volume: 0.55 });
     previewId = e.song.id;
   }
@@ -666,8 +762,25 @@ function drawSelect(): void {
   text('←→ 난이도 · Tab 건반 수', 304, 33, 12, '#a9a4c8');
   backButton();
   const list = entries();
+  // 다섯 줄씩 보이고, 고른 줄을 따라 내려간다
+  if (cursor < selTop) selTop = cursor;
+  if (cursor >= selTop + SEL_SHOW) selTop = cursor - SEL_SHOW + 1;
+  selTop = Math.max(0, Math.min(selTop, list.length - SEL_SHOW));
+  if (list.length > SEL_SHOW) {
+    [['▲', 66, -1], ['▼', 452, 1]].forEach(([a, y, d]) => {
+      const can = d === -1 ? selTop > 0 : selTop + SEL_SHOW < list.length;
+      g.globalAlpha = can ? 1 : 0.35;
+      button(String(a), 908, Number(y), 44, 40, false, 'grey');
+      g.globalAlpha = 1;
+      if (can) hitAct(904, Number(y) - 4, 52, 48, () => { selTop += Number(d); cursor = Math.max(selTop, Math.min(selTop + SEL_SHOW - 1, cursor)); });
+    });
+    const th = 410 * (SEL_SHOW / list.length), ty = 112 + (330 - th) * (selTop / Math.max(1, list.length - SEL_SHOW));
+    g.fillStyle = 'rgba(255,255,255,0.15)'; g.fillRect(928, 112, 4, 330);
+    g.fillStyle = '#ffd75a'; g.fillRect(928, ty, 4, Math.min(330, th));
+  }
   list.forEach((e, i) => {
-    const y = 66 + i * 86;
+    if (i < selTop || i >= selTop + SEL_SHOW) return;
+    const y = 66 + (i - selTop) * 86;
     const on = i === cursor;
     nine(img(on ? 'yellow_button_rectangle_depth_gloss' : 'grey_button_rectangle_depth_flat'), 60, y, 840, 78, 18);
     hitRow(i, 60, y, 840, 78);
@@ -906,7 +1019,7 @@ function drawYt(): void {
 /** 유튜브 화면으로 (영상·주소 칸 보이기) */
 function enterYt(c = 0): void {
   screen = 'yt'; cursor = c;
-  placeYt(470, 64, 466, 262);
+  placeYt(470 + Math.round((VW - W) / 2), 64, 466, 262);
   form.style.display = 'block';
   ytBox.style.display = yt.ready ? 'block' : 'none';
 }
@@ -1059,6 +1172,7 @@ function quitGame(): void {
   if (p.mode === 'own') { synth.stop(); screen = 'select'; synth.ctx.resume(); } else { yt.pause(); enterYt(R.mine); }
 }
 function key(code: string, down: boolean, repeat: boolean, at = performance.now()): void {
+  if (iosGuide) { if (down && (code === 'Enter' || code === 'Escape')) iosGuide = false; return; }
   if (screen === 'calib') {
     if (down && !repeat && code === 'Escape') { synth.stop(); screen = 'settings'; settingsMsg = ''; return; }
     if (down && !repeat && (code === 'Space' || KEYMAPS[set.lanes].includes(code))) calibTap(at);
@@ -1086,8 +1200,9 @@ function key(code: string, down: boolean, repeat: boolean, at = performance.now(
   const moveSfx = () => sfx.play('click-a', 0.3);
   switch (screen) {
     case 'title':
-      if (up) { cursor = (cursor + 2) % 3; moveSfx(); }
-      if (dn) { cursor = (cursor + 1) % 3; moveSfx(); }
+      const tn = titleItems().length;
+      if (up) { cursor = (cursor + tn - 1) % tn; moveSfx(); }
+      if (dn) { cursor = (cursor + 1) % tn; moveSfx(); }
       if (ok) {
         synth.resume();
         if (cursor === 2) { toggleFs(); break; }
@@ -1122,7 +1237,7 @@ function key(code: string, down: boolean, repeat: boolean, at = performance.now(
         if (cursor === 6) set.hitVol = Math.max(0.2, Math.min(1, Math.round((set.hitVol + d * 0.2) * 10) / 10));
         if (cursor === 7) set.meter = !set.meter;
         if (cursor === 8) set.noFail = !set.noFail;
-        if (cursor === 9) set.mobile = cycle(MOBILE, set.mobile, d);
+        if (cursor === 9) { set.mobile = cycle(MOBILE, set.mobile, d); setTimeout(fit, 0); }
         if (cursor === 10) { set.vibrate = !set.vibrate; if (set.vibrate) navigator.vibrate?.(30); }
         saveJson('yj_settings', set);
         if (cursor === 5 || cursor === 6) synth.resume().then(() => synth.tick(set.hitSound, set.hitVol)); // 들어 보기
@@ -1211,11 +1326,11 @@ window.addEventListener('keydown', (e) => {
 window.addEventListener('keyup', (e) => key(e.code, false, false, e.timeStamp));
 
 // 손가락: 판 위를 누르면 그 칸
-function lanesX(p: Play): [number, number] { return [fieldX(p), laneW(p.chart.lanes)]; }
+function lanesX(p: Play): [number, number] { const G = geo(p); return [G.x0, G.lw]; }
 const touchLane = new Map<number, number>();
 function pos(e: PointerEvent): [number, number] {
   const r = cv.getBoundingClientRect();
-  return [((e.clientX - r.left) / r.width) * W, ((e.clientY - r.top) / r.height) * H];
+  return [((e.clientX - r.left) / r.width) * VW - OX, ((e.clientY - r.top) / r.height) * H];
 }
 function hitAt(x: number, y: number) { return hits.find((b) => x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h); }
 let downHit: { id: number; x: number; y: number } | null = null;
@@ -1252,6 +1367,11 @@ cv.addEventListener('pointerup', (e) => {
 });
 cv.addEventListener('pointercancel', (e) => { liftLane(e); downHit = null; });
 cv.addEventListener('contextmenu', (e) => e.preventDefault());
+cv.addEventListener('wheel', (e) => {
+  if (screen !== 'select' && screen !== 'yt' && screen !== 'settings') return;
+  e.preventDefault();
+  key(e.deltaY > 0 ? 'ArrowDown' : 'ArrowUp', true, false);
+}, { passive: false });
 
 // ── 반복 ──
 function frame(): void {
@@ -1259,6 +1379,11 @@ function frame(): void {
   update();
   updateCalib();
   preview();
+  // 하는 중 화면은 넓어진 폭(VW)을 다 쓰고, 메뉴는 960 폭을 가운데에
+  OX = screen === 'play' ? 0 : Math.round((VW - W) / 2);
+  g.setTransform(SX, 0, 0, SY, 0, 0);
+  if (OX) g.translate(OX, 0);
+  form.style.left = `${24 + OX}px`;
   switch (screen) {
     case 'title': drawTitle(); break;
     case 'select': drawSelect(); break;
@@ -1268,10 +1393,12 @@ function frame(): void {
     case 'play': drawPlay(); break;
     case 'result': drawResult(); break;
   }
+  if (iosGuide) drawIosGuide();
   if (performance.now() - toastAt < 4000) {
-    g.font = '14px Galmuri'; const tw = Math.min(W - 40, g.measureText(toast).width + 40);
-    g.fillStyle = 'rgba(10,8,20,0.92)'; g.beginPath(); g.roundRect(W / 2 - tw / 2, H - 60, tw, 40, 10); g.fill();
-    text(fit2(toast, tw - 30, 14), W / 2, H - 40, 14, '#ffd75a', 'center');
+    const tcx = VW / 2 - OX;
+    g.font = '14px Galmuri'; const tw = Math.min(VW - 40, g.measureText(toast).width + 40);
+    g.fillStyle = 'rgba(10,8,20,0.92)'; g.beginPath(); g.roundRect(tcx - tw / 2, H - 60, tw, 40, 10); g.fill();
+    text(fit2(toast, tw - 30, 14), tcx, H - 40, 14, '#ffd75a', 'center');
   }
   requestAnimationFrame(frame);
 }

@@ -1,4 +1,5 @@
-// Web Audio로 자체곡을 실시간 합성. 1초 앞까지만 미리 예약해 노드가 쌓이지 않게 한다.
+// Web Audio로 자체곡을 실시간 합성. 0.6초 앞까지만 미리 예약해 노드가 쌓이지 않게 한다.
+// 곡마다 따로 볼륨 줄(bus)을 두어, 멈추거나 다른 곡으로 바꾸면 이미 예약된 소리까지 바로 끊는다.
 import { freq, type Song, type Ev } from '../core/music.ts';
 
 export class Synth {
@@ -15,6 +16,8 @@ export class Synth {
   analyser: AnalyserNode;
   private bins: Uint8Array<ArrayBuffer>;
   volume = 0.8;
+  private bus: GainNode;   // 지금 곡의 소리 (→ 압축기)
+  private send: GainNode;  // 지금 곡의 메아리 보내기 (→ delay)
 
   constructor() {
     this.ctx = new AudioContext({ latencyHint: 'interactive' });
@@ -38,6 +41,8 @@ export class Synth {
     this.noise = this.ctx.createBuffer(1, len, this.ctx.sampleRate);
     const d = this.noise.getChannelData(0);
     for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+    this.bus = this.ctx.createGain(); this.bus.connect(this.comp);
+    this.send = this.ctx.createGain(); this.send.connect(this.delay);
   }
 
   /** 오디오 출력 지연(초) — 판정에서 뺀다 */
@@ -59,8 +64,7 @@ export class Synth {
     this.idx = song.events.findIndex((e) => e.t >= from - 1e-6);
     if (this.idx < 0) this.idx = song.events.length;
     this.start = this.ctx.currentTime + delay - from * (60 / song.bpm);
-    this.out.gain.cancelScheduledValues(this.ctx.currentTime);
-    this.out.gain.setValueAtTime(this.volume * (opt.volume ?? 1), this.ctx.currentTime);
+    this.newBus(opt.volume ?? 1);
     this.off = null;
     this.pump();
     return this.start;
@@ -68,8 +72,17 @@ export class Synth {
 
   stop(): void {
     this.song = null;
-    this.out.gain.setTargetAtTime(0, this.ctx.currentTime, 0.05);
-    setTimeout(() => { if (!this.song) { this.out.gain.cancelScheduledValues(this.ctx.currentTime); this.out.gain.value = this.volume; } }, 200);
+    this.newBus(1);
+  }
+
+  /** 앞 곡의 볼륨 줄은 빠르게 줄이고 끊는다 (예약된 소리도 함께 사라짐). 새 줄을 만든다 */
+  private newBus(vol: number): void {
+    const c = this.ctx, now = c.currentTime;
+    const old = [this.bus, this.send];
+    for (const g of old) { g.gain.cancelScheduledValues(now); g.gain.setValueAtTime(g.gain.value, now); g.gain.linearRampToValueAtTime(0, now + 0.04); }
+    setTimeout(() => old.forEach((g) => { try { g.disconnect(); } catch { /* */ } }), 120);
+    this.bus = c.createGain(); this.bus.gain.value = vol; this.bus.connect(this.comp);
+    this.send = c.createGain(); this.send.gain.value = vol; this.send.connect(this.delay);
   }
 
   /** 곡 시간(초) */
@@ -171,7 +184,7 @@ export class Synth {
     const s = this.song;
     if (!s) return;
     const spb = 60 / s.bpm;
-    const horizon = this.ctx.currentTime + 1.0;
+    const horizon = this.ctx.currentTime + 0.6;
     while (this.idx < s.events.length) {
       const e = s.events[this.idx];
       const at = this.start + e.t * spb;
@@ -196,24 +209,72 @@ export class Synth {
     return o;
   }
 
+  /** 피아노 비슷한 소리: 치는 순간 밝고 빠르게 줄어든다 */
+  private piano(pitch: number, at: number, len: number, peak: number, bright: boolean): void {
+    const c = this.ctx, hz = freq(pitch);
+    const g = c.createGain(); const f = c.createBiquadFilter();
+    f.type = 'lowpass';
+    f.frequency.setValueAtTime(bright ? 5200 : 2600, at); f.frequency.exponentialRampToValueAtTime(bright ? 1400 : 900, at + 0.6);
+    f.connect(g).connect(this.bus); if (bright) g.connect(this.send);
+    const ring = Math.min(2.2, Math.max(0.35, len + 0.25)); // 뗀 뒤 조금 울림
+    g.gain.setValueAtTime(0, at); g.gain.linearRampToValueAtTime(peak, at + 0.004);
+    g.gain.exponentialRampToValueAtTime(peak * 0.35, at + 0.25);
+    g.gain.exponentialRampToValueAtTime(0.0008, at + ring);
+    this.osc('triangle', hz, at, at + ring, f);
+    const o2 = this.osc('sine', hz * 2, at, at + ring, f, 3); void o2;
+    const o3 = this.osc('square', hz, at, at + Math.min(ring, 0.15), f, -4);
+    const g3 = c.createGain(); g3.gain.value = 0.12; o3.disconnect(); o3.connect(g3).connect(f);
+  }
+  /** 짧은 숨소리·잡음 */
+  private noiseBurst(at: number, len: number, peak: number, f0: number): void {
+    const src = this.ctx.createBufferSource(); src.buffer = this.noise;
+    const fl = this.ctx.createBiquadFilter(); fl.type = 'bandpass'; fl.frequency.value = f0;
+    const g = this.ctx.createGain();
+    src.connect(fl).connect(g).connect(this.bus);
+    g.gain.setValueAtTime(peak, at); g.gain.exponentialRampToValueAtTime(0.0005, at + len);
+    src.start(at, Math.random() * 0.5); src.stop(at + len + 0.02);
+  }
+
   private voice(e: Ev, at: number, spb: number, s: Song): void {
     const c = this.ctx;
     const end = at + e.dur * spb * 0.95;
     switch (e.part) {
       case 'lead': {
+        if (s.lead === 'piano') { this.piano(e.pitch, at, e.dur * spb, 0.2 * e.vel, true); break; }
+        if (s.lead === 'flute') {
+          // 플루트: 부드럽게 시작, 살짝 떨림(비브라토), 숨소리 조금
+          const g = c.createGain(); const f = c.createBiquadFilter();
+          f.type = 'lowpass'; f.frequency.value = 3200;
+          f.connect(g).connect(this.bus); g.connect(this.send);
+          this.env(g, at, 0.06, 0.17 * e.vel, 0.2, 0.85, end, 0.12);
+          const o = this.osc('sine', freq(e.pitch), at, end, f);
+          const o2 = this.osc('triangle', freq(e.pitch) * 2, at, end, f);
+          const lfo = c.createOscillator(); const lg = c.createGain();
+          lfo.frequency.value = 5.2; lg.gain.setValueAtTime(0, at); lg.gain.linearRampToValueAtTime(freq(e.pitch) * 0.006, at + 0.35);
+          lfo.connect(lg); lg.connect(o.frequency); lg.connect(o2.frequency);
+          lfo.start(at); lfo.stop(end + 0.3);
+          const n2 = c.createGain(); n2.gain.value = 0.08; o2.disconnect(); o2.connect(n2).connect(f);
+          this.noiseBurst(at, 0.05, 0.03, 2400);
+          break;
+        }
         const g = c.createGain(); const f = c.createBiquadFilter();
         f.type = 'lowpass'; f.Q.value = 4;
         f.frequency.setValueAtTime(900, at); f.frequency.linearRampToValueAtTime(3800, at + 0.03); f.frequency.exponentialRampToValueAtTime(1600, at + 0.25);
-        f.connect(g).connect(this.comp); g.connect(this.delay);
+        f.connect(g).connect(this.bus); g.connect(this.send);
         this.env(g, at, 0.01, 0.16 * e.vel, 0.12, 0.7, end, 0.08);
-        this.osc(s.lead === 'saw' ? 'sawtooth' : s.lead, freq(e.pitch), at, end, f, -6);
-        this.osc(s.lead === 'saw' ? 'sawtooth' : s.lead === 'triangle' ? 'sine' : s.lead, freq(e.pitch), at, end, f, 7);
+        const wave: OscillatorType = s.lead === 'saw' ? 'sawtooth' : s.lead;
+        this.osc(wave, freq(e.pitch), at, end, f, -6);
+        this.osc(s.lead === 'triangle' ? 'sine' : wave, freq(e.pitch), at, end, f, 7);
+        break;
+      }
+      case 'keys': {
+        this.piano(e.pitch, at, e.dur * spb, 0.075 * e.vel, false);
         break;
       }
       case 'bass': {
         const g = c.createGain(); const f = c.createBiquadFilter();
         f.type = 'lowpass'; f.frequency.value = 600;
-        f.connect(g).connect(this.comp);
+        f.connect(g).connect(this.bus);
         this.env(g, at, 0.005, 0.22 * e.vel, 0.08, 0.6, end, 0.04);
         this.osc('sawtooth', freq(e.pitch), at, end, f);
         this.osc('sine', freq(e.pitch), at, end, f);
@@ -222,7 +283,7 @@ export class Synth {
       case 'pad': {
         const g = c.createGain(); const f = c.createBiquadFilter();
         f.type = 'lowpass'; f.frequency.value = 1400;
-        f.connect(g).connect(this.comp);
+        f.connect(g).connect(this.bus);
         this.env(g, at, 0.3, 0.035, 0.4, 0.8, end, 0.4);
         this.osc('sawtooth', freq(e.pitch), at, end, f, -10);
         this.osc('sawtooth', freq(e.pitch), at, end, f, 10);
@@ -230,13 +291,13 @@ export class Synth {
       }
       case 'arp': {
         const g = c.createGain();
-        g.connect(this.comp); g.connect(this.delay);
+        g.connect(this.bus); g.connect(this.send);
         this.env(g, at, 0.003, 0.05, 0.08, 0.2, end, 0.05);
         this.osc('square', freq(e.pitch), at, end, g);
         break;
       }
       case 'kick': {
-        const g = c.createGain(); g.connect(this.comp);
+        const g = c.createGain(); g.connect(this.bus);
         const o = this.osc('sine', 150, at, at + 0.3, g);
         o.frequency.setValueAtTime(150, at); o.frequency.exponentialRampToValueAtTime(42, at + 0.15);
         g.gain.setValueAtTime(0.9, at); g.gain.exponentialRampToValueAtTime(0.001, at + 0.3);
@@ -248,12 +309,12 @@ export class Synth {
         f.type = e.part === 'snare' ? 'bandpass' : 'highpass';
         f.frequency.value = e.part === 'snare' ? 1800 : 7000;
         const g = c.createGain();
-        src.connect(f).connect(g).connect(this.comp);
+        src.connect(f).connect(g).connect(this.bus);
         const len = e.part === 'snare' ? 0.16 : 0.04;
         g.gain.setValueAtTime(e.part === 'snare' ? 0.45 : 0.12, at); g.gain.exponentialRampToValueAtTime(0.001, at + len);
         src.start(at, Math.random() * 0.5); src.stop(at + len + 0.02);
         if (e.part === 'snare') {
-          const tg = c.createGain(); tg.connect(this.comp);
+          const tg = c.createGain(); tg.connect(this.bus);
           const o = this.osc('triangle', 220, at, at + 0.1, tg);
           o.frequency.exponentialRampToValueAtTime(120, at + 0.08);
           tg.gain.setValueAtTime(0.25, at); tg.gain.exponentialRampToValueAtTime(0.001, at + 0.1);
