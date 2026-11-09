@@ -14,7 +14,7 @@ GitHub Pages(`https://minhyuk94.github.io/youtujam/`)에 올린다.
 - 자체곡은 `src/core/music.ts`(작곡 도구)·`songs.ts`(곡)로 코드에서 만든다. 음원 파일을 넣지 않는다. 노트는 곡 소리에서 만들고(키음), 친 순간 그 소리가 난다.
 - 규칙(채보·판정·점수·잼 게이지·키 배치)은 `src/core/`에 화면과 분리한 순수 TS (import에 `.ts` → `node --test`로 바로 테스트). 새 규칙에는 `tests/core.test.ts`에 테스트를 더한다.
 - 유튜브는 IFrame Player API(키 필요 없음). 소리를 분석할 수 없으므로 채보는 BPM·첫 박으로 만들거나 직접 쳐서 녹음한다. 영상은 화면에 보이게 둔다(약관).
-- 내 영상 목록(`src/core/library.ts`): 불러온 영상·BPM·직접 친 채보(여러 개, 덮어쓰지 않음)를 localStorage `yj_library` 하나에 저장. 모양을 바꾸면 `parse`가 예전 값을 읽을 수 있게 하고 테스트를 더한다. 백업 파일 내보내기·가져오기(`merge`).
+- 내 영상 목록(`src/core/library.ts`): 불러온 영상·BPM·직접 친 채보(여러 개, 덮어쓰지 않음)를 localStorage `yj_library` 하나에 저장. 모양을 바꾸면 `parse`가 예전 값을 읽을 수 있게 하고 테스트를 더한다. 백업 파일 내보내기·가져오기(`merge`). 리듬 채보(`lanes: 1`)는 박자만 저장하고, 할 때 `arrangeTaps`(chart.ts)로 건반 수·난이도에 맞춰 칸을 정한다.
 - 시계: 자체곡은 `AudioContext.getOutputTimestamp`로 스피커 시각과 화면 시각을 이어 붙이고, 판정은 키 이벤트의 `timeStamp`로 한다.
 - CI(`ci.yml`): 테스트 → 타입 검사 → 빌드 → headless Chrome으로 켜지는지 → Pages 배포.
 - 큰 기능이 바뀌면 이력서 저장소(minhyuk94.github.io)의 `games` 카드도 ko/ja/en으로 맞춘다. 소스 코드·저장소 링크는 이력서에 넣지 않는다.

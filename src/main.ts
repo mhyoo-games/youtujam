@@ -1,7 +1,7 @@
 // 유튜잼: 화면·입력·게임 진행
 import { SONGS } from './core/songs.ts';
 import type { Song } from './core/music.ts';
-import { fromSong, fromBeat, cleanRecorded, levelNumber, type Chart, type Note, type Level } from './core/chart.ts';
+import { fromSong, fromBeat, cleanRecorded, levelNumber, arrangeTaps, type Chart, type Note, type Level } from './core/chart.ts';
 import { grade, releaseGrade, newTally, apply, accuracy, rank, WINDOWS, type Grade, type Tally } from './core/judge.ts';
 import { KEYMAPS, KEYLABEL, youtubeId, tapBpm, calibrate } from './core/keys.ts';
 import { Synth, Sfx } from './audio/synth.ts';
@@ -128,7 +128,7 @@ function entries(): Entry[] {
 interface PNote extends Note { done: boolean; holding: boolean; tailDone: boolean; hitAt: number }
 interface Play {
   chart: Chart; notes: PNote[]; tally: Tally; mode: 'own' | 'yt' | 'record';
-  song?: Song; ytId?: string; chartId?: string; leadUntil: number; title: string; length: number; end: number;
+  song?: Song; ytId?: string; chartId?: string; leadUntil: number; tap: boolean; tapDown: Map<string, number>; title: string; length: number; end: number;
   lastGrade: Grade | null; gradeAt: number; held: boolean[]; flashes: Array<{ lane: number; at: number; g: Grade }>;
   rec: Note[]; recDown: number[]; paused: boolean; jamAt: number; bursts: Array<{ lane: number; at: number }>;
 }
@@ -164,7 +164,7 @@ function startOwn(song: Song): void {
 function newPlay(chart: Chart, mode: Play['mode'], title: string, length: number): Play {
   const notes = chart.notes.map((n) => ({ ...n, done: false, holding: false, tailDone: n.len <= 0, hitAt: 0 }));
   const total = notes.length + notes.filter((n) => n.len > 0).length;
-  return { chart, notes, tally: newTally(total), mode, title, length, end: length + 1.5, lastGrade: null, gradeAt: -9, held: new Array(chart.lanes).fill(false), flashes: [], rec: [], recDown: new Array(chart.lanes).fill(-1), paused: false, jamAt: -9999, bursts: [], leadUntil: 0 };
+  return { chart, notes, tally: newTally(total), mode, title, length, end: length + 1.5, lastGrade: null, gradeAt: -9, held: new Array(chart.lanes).fill(false), flashes: [], rec: [], recDown: new Array(chart.lanes).fill(-1), paused: false, jamAt: -9999, bursts: [], leadUntil: 0, tap: false, tapDown: new Map() };
 }
 
 function judge(p: Play, gr: Grade, lane: number, burst = true): void {
@@ -194,6 +194,22 @@ function press(lane: number, at = performance.now()): void {
   else if (best.len > 0) { best.tailDone = true; judge(p, 'MISS', lane); }
   if (best.ev !== undefined && p.mode === 'own') synth.keysound(best.ev); // 키음
   else hit();
+}
+/** 리듬 채보 녹음: 아무 키나 눌렀다 뗀 시각 (0.35초 넘게 누르면 길게) */
+function tapDownAt(p: Play, code: string, at: number): void {
+  if (p.tapDown.has(code)) return;
+  p.tapDown.set(code, clock(Math.min(at, performance.now())));
+  p.held.fill(true);
+  p.flashes.push({ lane: Math.floor(p.chart.lanes / 2), at: performance.now(), g: 'PERFECT' });
+  hit();
+}
+function tapUp(p: Play, code: string, at = performance.now()): void {
+  const down = p.tapDown.get(code);
+  if (down === undefined) return;
+  p.tapDown.delete(code);
+  const now = clock(Math.min(at, performance.now()));
+  p.rec.push({ t: down, lane: 0, len: now - down >= 0.35 ? now - down : 0 });
+  if (!p.tapDown.size) p.held.fill(false);
 }
 function hit(): void { if (set.hitSound) sfx.play('tap-a', 0.12); }
 
@@ -236,21 +252,24 @@ function finish(): void {
   if (p.mode === 'record') {
     // 누르고 있던 건반은 지금 뗀 것으로
     for (let i = 0; i < p.chart.lanes; i++) if (p.recDown[i] >= 0) release(i);
-    const notes = cleanRecorded(p.rec, p.chart.lanes);
+    for (const code of [...p.tapDown.keys()]) tapUp(p, code);
+    // 리듬 채보는 칸 없이(0번) 박자만 저장 → 할 때 건반 수·난이도에 맞춰 칸을 정한다
+    const notes = p.tap ? cleanRecorded(p.rec, 1) : cleanRecorded(p.rec, p.chart.lanes);
     const v = Lib.find(lib, p.ytId!) ?? Lib.touch(lib, p.ytId!, { title: yt.title(), duration: yt.duration() }, Date.now());
     if (notes.length) {
-      const c = Lib.addChart(v, p.chart.lanes, notes, Date.now());
+      const c = Lib.addChart(v, p.tap ? Lib.RHYTHM : p.chart.lanes, notes, Date.now());
       saveLib();
       chartPick = 0;
-      ytMsg = `"${c.name}" 저장 (노트 ${notes.length}개). "내 채보로 하기"로 해 보세요.`;
-    } else ytMsg = '친 노트가 없어서 저장하지 않았어요.';
-    enterYt(2);
+      ytMsg = `"${c.name}" 저장 (박자 ${notes.length}개). "내 채보로 하기"로 해 보세요.`;
+    } else ytMsg = '친 게 없어서 저장하지 않았어요.';
+    enterYt(R.mine);
     return;
   }
   const key = p.song ? `${p.song.id}_${p.chart.lanes}_${p.chart.level}` : p.chartId ? `yt_${p.ytId}_${p.chartId}` : `yt_${p.ytId}_${p.chart.lanes}_${p.chart.level}_auto`;
   const old = best[key];
   if (!p.tally.failed && (!old || p.tally.score > old.score)) { best[key] = { score: p.tally.score, rank: rank(p.tally) }; saveJson('yj_best', best); resultNew = true; } else resultNew = false;
   sfx.play('switch-a', 0.5);
+  ytBox.style.display = 'none';
   screen = 'result';
 }
 let resultNew = false;
@@ -490,9 +509,9 @@ function drawPlay(): void {
   } else {
     text(fit2(p.title, hw - 160, 16), hx, 24, 16, '#fff', 'left', 'GalmuriB');
     const c = p.chartId ? Lib.chartsFor(Lib.find(lib, p.ytId!), p.chart.lanes).find((x) => x.id === p.chartId) : undefined;
-    text(p.mode === 'record' ? '● 녹음 중 — 노래에 맞춰 건반을 치세요 · Esc 끝내고 저장' : c ? `유튜브 · 내 ${c.name}` : '유튜브 · 박자 채보', hx, 48, 12, p.mode === 'record' ? '#ff8a8a' : '#cfd3ea');
+    text(p.mode === 'record' ? (p.tap ? '● 리듬 녹음 중 — 노트가 나올 때마다 아무 키나 · 길게=길게 · Esc 저장' : '● 녹음 중 — 노래에 맞춰 건반을 치세요 · Esc 끝내고 저장') : c ? `유튜브 · 내 ${c.name}` : '유튜브 · 박자 채보', hx, 48, 12, p.mode === 'record' ? '#ff8a8a' : '#cfd3ea');
   }
-  text(p.mode === 'record' ? `${p.chart.lanes}K  녹음` : `${p.chart.lanes}K  ${LEVEL_KO[p.chart.level]}  Lv.${lv}  ×${set.speed.toFixed(1)}`, hx + hw, 24, 13, '#ffd75a', 'right');
+  text(p.mode === 'record' ? (p.tap ? '리듬 녹음' : `${p.chart.lanes}K  녹음`) : `${p.chart.lanes}K  ${LEVEL_KO[p.chart.level]}  Lv.${lv}  ×${set.speed.toFixed(1)}`, hx + hw, 24, 13, '#ffd75a', 'right');
   const sy = 392;
   nine(img('grey_button_rectangle_depth_flat'), hx, sy, hw, 120, 16);
   text('SCORE', hx + 20, sy + 26, 12, '#4a4466', 'left', 'KFuture');
@@ -501,7 +520,7 @@ function drawPlay(): void {
   const prog = Math.max(0, Math.min(1, now / p.length));
   g.fillStyle = '#b9bdd3'; g.fillRect(hx + 20, sy + 88, hw - 40, 8);
   g.fillStyle = '#ff4fa8'; g.fillRect(hx + 20, sy + 88, (hw - 40) * prog, 8);
-  if (p.mode === 'record') text(`친 노트 ${p.rec.length}`, hx + 20, sy + 66, 13, '#c0303f');
+  if (p.mode === 'record') text(`${p.tap ? '친 박자' : '친 노트'} ${p.rec.length + p.tapDown.size}`, hx + 20, sy + 66, 13, '#c0303f');
   if (now < 0) text(String(Math.ceil(-now)), x0 + (p.chart.lanes * laneW(p.chart.lanes)) / 2, 150, 64, '#ffd75a', 'center', 'KFuture');
   if (p.paused) {
     g.fillStyle = 'rgba(0,0,0,0.6)'; g.fillRect(0, 0, W, H);
@@ -670,7 +689,9 @@ let chartPick = 0;
 let libTop = 0;                 // 목록에서 맨 위에 보이는 칸
 let armed = '', armedAt = 0;    // 지우기는 두 번 눌러야
 const LIB_SHOW = 3;
-const YT_ROWS = ['영상 불러오기', '채보 만들기 (노래 들으며 직접 치기)', '내 채보로 하기', '건반 수', '자동 채보 (박자만 맞춰서 대충)', 'BPM (재생 중 T 두드리기)', '첫 박 (재생 중 첫 박에 B)', '돌아가기'];
+const YT_ROWS = ['영상 불러오기', '리듬 채보 만들기 (키 하나로 박자만 치기)', '채보 만들기 (건반까지 직접 정해서 치기)', '내 채보로 하기', '건반 수', '자동 채보 (BPM으로 대충)', 'BPM (재생 중 T 두드리기)', '첫 박 (재생 중 첫 박에 B)', '돌아가기'];
+// 메뉴 번호
+const R = { load: 0, tap: 1, rec: 2, mine: 3, lanes: 4, auto: 5, bpm: 6, beat: 7, back: 8 };
 // 커서 번호: 0~7 메뉴, 8~ 목록의 영상들, 그 뒤 두 칸은 백업 내보내기·가져오기
 function ytCount(): number { return YT_ROWS.length + lib.videos.length + 2; }
 function libIndex(c: number): number { return c - YT_ROWS.length; }
@@ -698,21 +719,22 @@ function drawYt(): void {
   const charts = Lib.chartsFor(v, set.lanes);
   if (chartPick >= charts.length) chartPick = Math.max(0, charts.length - 1);
   YT_ROWS.forEach((r, i) => {
-    const y = 104 + i * 46;
+    const y = 100 + i * 41;
     const on = i === cursor;
-    const need = i >= 1 && i <= 6 && i !== 3;
-    const disabled = (need && !yt.ready) || (i === 2 && !charts.length);
+    const need = i !== R.load && i !== R.lanes && i !== R.back;
+    const disabled = (need && !yt.ready) || (i === R.mine && !charts.length);
     g.globalAlpha = disabled ? 0.45 : 1;
-    nine(img(on ? 'yellow_button_rectangle_depth_gloss' : 'grey_button_rectangle_depth_flat'), 24, y, 426, 40, 16);
-    hitRow(i, 24, y, 426, 40);
+    nine(img(on ? 'yellow_button_rectangle_depth_gloss' : 'grey_button_rectangle_depth_flat'), 24, y, 426, 36, 14);
+    hitRow(i, 24, y, 426, 36);
     const dark = on ? '#3b2a00' : '#2a2440';
     let val = '';
-    if (i === 2) val = charts.length ? `◀ ${charts[chartPick].name} · 노트 ${charts[chartPick].notes.length} ▶` : '없음';
-    if (i === 3) val = `◀ ${set.lanes}건반 ▶`;
-    if (i === 5) val = `◀ ${ytBpm} ▶`;
-    if (i === 6) val = `◀ ${ytOffset.toFixed(2)}초 ▶`;
-    text(fit2(r, val ? 220 : 390, 13), 40, y + 18, 13, dark);
-    if (val) text(val, 436, y + 18, 13, dark, 'right');
+    if (i === R.mine) val = charts.length ? `◀ ${charts[chartPick].name} · ${charts[chartPick].notes.length} ▶` : '없음';
+    if (i === R.lanes) val = `◀ ${set.lanes}건반 ▶`;
+    if (i === R.bpm) val = `◀ ${ytBpm} ▶`;
+    if (i === R.beat) val = `◀ ${ytOffset.toFixed(2)}초 ▶`;
+    if (i === R.tap) val = '추천';
+    text(fit2(r, val ? 250 : 390, 13), 40, y + 16, 13, dark);
+    if (val) text(val, 436, y + 16, 13, i === R.tap ? (on ? '#b0306a' : '#d0407a') : dark, 'right');
     g.globalAlpha = 1;
   });
   // 오른쪽: 영상 자리
@@ -815,7 +837,7 @@ function saveBeat(): void {
 
 let lastYtMode: 'auto' | 'mine' = 'auto';
 let lastChartId = '';
-function ytStart(mode: 'auto' | 'record' | 'mine', chartId?: string): void {
+function ytStart(mode: 'auto' | 'record' | 'tap' | 'mine', chartId?: string): void {
   if (!yt.ready || yt.error || !ytId) { ytMsg = '먼저 영상을 불러와 주세요.'; return; }
   saveBeat();
   const dur = yt.duration();
@@ -825,12 +847,14 @@ function ytStart(mode: 'auto' | 'record' | 'mine', chartId?: string): void {
     const charts = Lib.chartsFor(current(), set.lanes);
     const c = (chartId && charts.find((x) => x.id === chartId)) || charts[chartPick];
     if (!c) { ytMsg = `${set.lanes}건반 채보가 없어요. "채보 만들기"로 먼저 만들어 주세요.`; return; }
-    chart = { notes: c.notes, lanes: c.lanes, level: set.level };
+    const notes = c.lanes === Lib.RHYTHM ? arrangeTaps(c.notes, set.lanes, set.level, c.id) : c.notes;
+    chart = { notes, lanes: set.lanes, level: set.level };
     cid = c.id; lastChartId = c.id;
-  } else if (mode === 'record') chart = { notes: [], lanes: set.lanes, level: set.level };
+  } else if (mode === 'record' || mode === 'tap') chart = { notes: [], lanes: set.lanes, level: set.level };
   else chart = fromBeat(ytBpm, ytOffset, dur, set.lanes, set.level, ytId);
-  if (mode !== 'record') lastYtMode = mode;
-  play = newPlay(chart, mode === 'record' ? 'record' : 'yt', yt.title() || '유튜브 영상', dur);
+  if (mode === 'auto' || mode === 'mine') lastYtMode = mode;
+  play = newPlay(chart, mode === 'record' || mode === 'tap' ? 'record' : 'yt', yt.title() || '유튜브 영상', dur);
+  play.tap = mode === 'tap';
   play.ytId = ytId;
   play.chartId = cid;
   play.end = dur + 1;
@@ -891,7 +915,7 @@ function key(code: string, down: boolean, repeat: boolean, at = performance.now(
     if (code === 'Escape' && down) {
       if (play.mode === 'record') { finish(); return; }
       if (!play.paused) { play.paused = true; pausedAt = performance.now(); if (play.mode === 'own') synth.ctx.suspend(); else yt.pause(); }
-      else { play.paused = false; if (play.mode === 'own') synth.stop(); else yt.pause(); if (play.mode === 'own') screen = 'select'; else enterYt(2); if (play.mode === 'own') synth.ctx.resume(); }
+      else { play.paused = false; if (play.mode === 'own') synth.stop(); else yt.pause(); if (play.mode === 'own') screen = 'select'; else enterYt(R.mine); if (play.mode === 'own') synth.ctx.resume(); }
       return;
     }
     if (play.paused) {
@@ -903,6 +927,7 @@ function key(code: string, down: boolean, repeat: boolean, at = performance.now(
       }
       return;
     }
+    if (play.tap) { if (!repeat) { if (down) tapDownAt(play, code, at); else tapUp(play, code, at); } return; }
     const lane = laneOf(code);
     if (lane >= 0 && !repeat) (down ? press : release)(lane, at);
     return;
@@ -967,14 +992,14 @@ function key(code: string, down: boolean, repeat: boolean, at = performance.now(
       if (code === 'Tab') { set.lanes = cycle([4, 5, 6, 7], set.lanes, 1); chartPick = 0; saveJson('yj_settings', set); moveSfx(); }
       const d = rt ? 1 : lf ? -1 : 0;
       const charts = Lib.chartsFor(current(), set.lanes);
-      if (d && cursor === 2 && charts.length) { chartPick = (chartPick + d + charts.length) % charts.length; moveSfx(); }
-      if (d && cursor === 3) { set.lanes = cycle([4, 5, 6, 7], set.lanes, d); chartPick = 0; saveJson('yj_settings', set); moveSfx(); }
-      if (d && cursor === 5) { ytBpm = Math.max(40, Math.min(260, Math.round((ytBpm + d) * 10) / 10)); saveBeat(); }
-      if (d && cursor === 6) { ytOffset = Math.max(0, Math.round((ytOffset + d * 0.02) * 100) / 100); saveBeat(); }
+      if (d && cursor === R.mine && charts.length) { chartPick = (chartPick + d + charts.length) % charts.length; moveSfx(); }
+      if (d && cursor === R.lanes) { set.lanes = cycle([4, 5, 6, 7], set.lanes, d); chartPick = 0; saveJson('yj_settings', set); moveSfx(); }
+      if (d && cursor === R.bpm) { ytBpm = Math.max(40, Math.min(260, Math.round((ytBpm + d) * 10) / 10)); saveBeat(); }
+      if (d && cursor === R.beat) { ytOffset = Math.max(0, Math.round((ytOffset + d * 0.02) * 100) / 100); saveBeat(); }
       const list = Lib.sorted(lib);
       const li = libIndex(cursor);
       if (code === 'Delete' || code === 'Backspace') {
-        if (cursor === 2 && charts[chartPick]) {
+        if (cursor === R.mine && charts[chartPick]) {
           const c = charts[chartPick];
           if (confirmDel('c' + c.id, `"${c.name}" 지우기`)) { Lib.removeChart(current()!, c.id); saveLib(); chartPick = 0; ytMsg = `"${c.name}"을 지웠어요.`; }
         } else if (li >= 0 && li < list.length) {
@@ -983,11 +1008,12 @@ function key(code: string, down: boolean, repeat: boolean, at = performance.now(
         }
       }
       if (ok) {
-        if (cursor === 0) { if (urlIn.value.trim() && youtubeId(urlIn.value) !== ytId) ytLoad(); else urlIn.focus(); }
-        if (cursor === 1) ytStart('record');
-        if (cursor === 2) ytStart('mine');
-        if (cursor === 4) ytStart('auto');
-        if (cursor === 7) back2select();
+        if (cursor === R.load) { if (urlIn.value.trim() && youtubeId(urlIn.value) !== ytId) ytLoad(); else urlIn.focus(); }
+        if (cursor === R.tap) ytStart('tap');
+        if (cursor === R.rec) ytStart('record');
+        if (cursor === R.mine) ytStart('mine');
+        if (cursor === R.auto) ytStart('auto');
+        if (cursor === R.back) back2select();
         if (li >= 0 && li < list.length) { if (list[li].id !== ytId || !yt.ready) ytLoad(list[li].id); else ytMsg = '지금 불러온 영상이에요.'; }
         if (li === list.length) exportLib();
         if (li === list.length + 1) fileIn.click();
@@ -997,7 +1023,7 @@ function key(code: string, down: boolean, repeat: boolean, at = performance.now(
     }
     case 'result':
       if (ok && play) { if (play.song) startOwn(play.song); else ytStart(lastYtMode, lastChartId); }
-      if (back) { if (play && !play.song) enterYt(2); else back2select(); }
+      if (back) { if (play && !play.song) enterYt(R.mine); else back2select(); }
       break;
   }
 }
@@ -1024,6 +1050,7 @@ cv.addEventListener('pointerdown', (e) => {
   const r = cv.getBoundingClientRect();
   const x = ((e.clientX - r.left) / r.width) * W;
   if (screen === 'play' && play && !play.paused) {
+    if (play.tap) { tapDownAt(play, 'p' + e.pointerId, e.timeStamp); return; }
     const [x0, lw] = lanesX(play);
     const lane = Math.floor((x - x0) / lw);
     if (lane >= 0 && lane < play.chart.lanes) { touchLane.set(e.pointerId, lane); press(lane, e.timeStamp); }
@@ -1036,6 +1063,7 @@ cv.addEventListener('pointerdown', (e) => {
   if (screen !== 'yt') key('Enter', true, false);
 });
 cv.addEventListener('pointerup', (e) => {
+  if (screen === 'play' && play && play.tap) { tapUp(play, 'p' + e.pointerId, e.timeStamp); return; }
   const lane = touchLane.get(e.pointerId);
   if (lane !== undefined && play) { release(lane, e.timeStamp); touchLane.delete(e.pointerId); }
 });

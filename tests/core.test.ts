@@ -218,3 +218,58 @@ test('예전 저장 방식에서 옮기기', () => {
   assert.equal(v.bpm, 128);
   assert.equal(chartsFor(v, 4).length, 1);
 });
+
+import { arrangeTaps } from '../src/core/chart.ts';
+
+function tapsOf(times: number[], len = 0): { t: number; lane: number; len: number }[] { return times.map((t) => ({ t, lane: 0, len })); }
+
+test('리듬 채보: 친 박자는 그대로, 칸은 자동', () => {
+  const times = [1, 1.5, 2, 2.5, 3, 3.12, 3.24, 3.36, 3.48, 4, 4.5, 5];
+  for (const lanes of [4, 5, 6, 7]) {
+    const out = arrangeTaps(tapsOf(times), lanes, 'normal', 'x');
+    const ts = [...new Set(out.map((n) => n.t))];
+    assert.deepEqual(ts, times, `${lanes}건반: 박자가 그대로`);
+    assert.ok(out.every((n) => n.lane >= 0 && n.lane < lanes));
+    const singles = times.map((t) => out.filter((n) => n.t === t));
+    for (let i = 1; i < singles.length; i++) {
+      if (times[i] - times[i - 1] < 0.3) {
+        const a = singles[i - 1].map((n) => n.lane), b = singles[i].map((n) => n.lane);
+        assert.ok(!b.some((l) => a.includes(l)), '빠른 곳에서 같은 칸 연타 없음');
+      }
+    }
+    assert.ok(new Set(out.map((n) => n.lane)).size >= Math.min(lanes, 4), '여러 칸을 고루 씀');
+  }
+  assert.deepEqual(arrangeTaps(tapsOf(times), 7, 'hard', 'a'), arrangeTaps(tapsOf(times), 7, 'hard', 'a'), '같은 채보면 늘 같음');
+});
+
+test('리듬 채보: 길게 누른 건 길게, 그동안 같은 칸에 노트 없음', () => {
+  const taps = [{ t: 1, lane: 0, len: 1.2 }, { t: 1.4, lane: 0, len: 0 }, { t: 1.8, lane: 0, len: 0 }, { t: 2.1, lane: 0, len: 0 }, { t: 2.5, lane: 0, len: 0.1 }];
+  for (const lanes of [4, 7]) {
+    const out = arrangeTaps(taps, lanes, 'hard', 's');
+    const hold = out.find((n) => n.t === 1)!;
+    assert.ok(Math.abs(hold.len - 1.2) < 1e-9);
+    assert.ok(out.filter((n) => n.lane === hold.lane && n.t > 1 && n.t < 2.2 + 0.04).length === 0);
+    assert.equal(out.find((n) => n.t === 2.5)!.len, 0, '짧게 누른 건 보통 노트');
+  }
+});
+
+test('리듬 채보: 겹친 입력 정리, 쉬움은 빠른 연타를 줄이고 어려움은 동시 누르기가 더 많음', () => {
+  assert.equal(arrangeTaps(tapsOf([1, 1.01, 2]), 4, 'normal', 'q').filter((n) => n.t < 1.5).length, 1);
+  const fast = Array.from({ length: 16 }, (_, i) => 1 + i * 0.1);
+  assert.ok(arrangeTaps(tapsOf(fast), 4, 'easy', 'q').length < 16);
+  const slow = Array.from({ length: 60 }, (_, i) => 1 + i * 0.6);
+  const n = arrangeTaps(tapsOf(slow), 7, 'normal', 'q').length, hd = arrangeTaps(tapsOf(slow), 7, 'hard', 'q').length;
+  assert.equal(arrangeTaps(tapsOf(slow), 7, 'easy', 'q').length, 60, '쉬움은 동시 누르기 없음');
+  assert.ok(n > 60 && hd > n, `${n} < ${hd}`);
+});
+
+test('리듬 채보는 어느 건반 수에서도 보임', () => {
+  const lib = emptyLibrary();
+  const v = touch(lib, 'aaaaaaaaaaa', {}, 1);
+  const r = addChart(v, 1, [{ t: 1, lane: 0, len: 0 }], 5);
+  addChart(v, 4, [], 6);
+  assert.equal(r.name, '리듬 채보 1');
+  assert.equal(chartsFor(v, 7).length, 1);
+  assert.equal(chartsFor(v, 4).length, 2);
+  assert.equal(parseLib(JSON.stringify(lib)).videos[0].charts.length, 2, '저장했다 읽어도 남음');
+});

@@ -2,7 +2,9 @@
 // 화면·저장소와 상관없는 순수 계산 (저장은 main.ts에서 localStorage로).
 import type { Note } from './chart.ts';
 
+/** lanes 1 = 리듬 채보 (키 하나로 박자만 친 것, 칸은 할 때마다 건반 수·난이도에 맞춰 자동으로) */
 export interface SavedChart { id: string; lanes: number; notes: Note[]; at: number; name: string }
+export const RHYTHM = 1;
 export interface Video {
   id: string; title: string; duration: number;
   bpm: number; offset: number;          // 박자 채보용
@@ -36,18 +38,19 @@ export function touch(lib: Library, id: string, info: { title?: string; duration
   return v;
 }
 
-/** 이 영상, 이 건반 수의 채보들 (최근 것부터) */
+/** 이 영상, 이 건반 수로 할 수 있는 채보들 (리듬 채보는 어느 건반 수로도). 최근 것부터 */
 export function chartsFor(v: Video | undefined, lanes: number): SavedChart[] {
   if (!v) return [];
-  return v.charts.filter((c) => c.lanes === lanes).sort((a, b) => b.at - a.at);
+  return v.charts.filter((c) => c.lanes === lanes || c.lanes === RHYTHM).sort((a, b) => b.at - a.at);
 }
 
-/** 새 채보를 더한다 (덮어쓰지 않음). 이름은 "채보 n" */
+/** 새 채보를 더한다 (덮어쓰지 않음). 이름은 "채보 n" / 리듬 채보는 "리듬 채보 n" */
 export function addChart(v: Video, lanes: number, notes: Note[], now: number): SavedChart {
   const n = v.charts.filter((c) => c.lanes === lanes).length + 1;
+  const label = lanes === RHYTHM ? '리듬 채보' : '채보';
   let id = `c${now.toString(36)}`;
   while (v.charts.some((c) => c.id === id)) id += 'x';
-  const c: SavedChart = { id, lanes, notes, at: now, name: `채보 ${n}` };
+  const c: SavedChart = { id, lanes, notes, at: now, name: `${label} ${n}` };
   v.charts.push(c);
   v.last = now;
   return c;
@@ -76,7 +79,7 @@ export function parse(text: string | null): Library {
       if (!v || typeof v.id !== 'string' || !/^[\w-]{11}$/.test(v.id)) continue;
       const charts: SavedChart[] = [];
       for (const c of Array.isArray(v.charts) ? v.charts : []) {
-        if (!c || typeof c.id !== 'string' || ![4, 5, 6, 7].includes(c.lanes) || !Array.isArray(c.notes)) continue;
+        if (!c || typeof c.id !== 'string' || ![RHYTHM, 4, 5, 6, 7].includes(c.lanes) || !Array.isArray(c.notes)) continue;
         const notes = c.notes.filter((n: Note) => n && Number.isFinite(n.t) && Number.isInteger(n.lane) && n.lane >= 0 && n.lane < c.lanes)
           .map((n: Note) => ({ t: n.t, lane: n.lane, len: Number.isFinite(n.len) && n.len > 0 ? n.len : 0 }));
         charts.push({ id: c.id, lanes: c.lanes, notes, at: Number(c.at) || 0, name: String(c.name || '채보') });

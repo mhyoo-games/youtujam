@@ -103,3 +103,69 @@ export function cleanRecorded(notes: Note[], lanes: number): Note[] {
   }
   return out;
 }
+
+/** 리듬 채보: 키 하나로 친 박자(시각·길이)를 그대로 두고 건반 칸을 자동으로 정한다.
+ *  - 빠르게 이어지면 계단(끝에서 되돌아옴), 느리면 왼손·오른손을 번갈아 고르게
+ *  - 같은 칸 연타(잭)는 피하고, 길게 누르는 동안 그 칸은 비워 둠
+ *  - 쉬움: 아주 빠른 연타는 하나 걸러, 보통·어려움: 여유 있는 곳에 동시 누르기를 더함
+ *  같은 seed면 늘 같은 결과 (채보 id를 씀) */
+export function arrangeTaps(taps: Note[], lanes: number, level: Level, seed: string): Note[] {
+  let h = 2166136261;
+  for (const ch of seed + lanes + level) h = Math.imul(h ^ ch.charCodeAt(0), 16777619);
+  const rnd = () => { h ^= h << 13; h ^= h >>> 17; h ^= h << 5; return ((h >>> 0) % 100000) / 100000; };
+  // 정리: 시간순, 30ms 안에 겹친 건 하나로
+  const src: Note[] = [];
+  for (const n of [...taps].filter((n) => Number.isFinite(n.t)).sort((a, b) => a.t - b.t)) {
+    const last = src[src.length - 1];
+    if (last && n.t - last.t < 0.03) { last.len = Math.max(last.len, n.len); continue; }
+    src.push({ t: n.t, lane: 0, len: n.len > 0 ? n.len : 0 });
+  }
+  // 쉬움: 0.2초보다 빠른 연타는 하나 걸러
+  const seq = level === 'easy' ? src.filter((n, i) => i === 0 || n.t - src[i - 1].t >= 0.2 || i % 2 === 0) : src;
+  const out: Note[] = [];
+  const busy = new Array(lanes).fill(-1);       // 이 시각까지 길게 누르는 중
+  const lastAt = new Array(lanes).fill(-99);
+  const mid = (lanes - 1) / 2;
+  let prev = Math.floor(rnd() * lanes), dir = rnd() < 0.5 ? 1 : -1;
+  const free = (l: number, t: number) => l >= 0 && l < lanes && busy[l] < t - 0.04;
+  for (let i = 0; i < seq.length; i++) {
+    const n = seq[i];
+    const gapPrev = i ? n.t - seq[i - 1].t : 9;
+    const gapNext = i < seq.length - 1 ? seq[i + 1].t - n.t : 9;
+    let lane = -1;
+    if (gapPrev < 0.22) {
+      // 빠른 흐름: 계단, 막히면 방향을 바꿔 되돌아옴
+      for (const d of [dir, -dir]) { if (free(prev + d, n.t)) { lane = prev + d; dir = d; break; } }
+    } else {
+      // 느린 곳: 지난번과 반대쪽 손을 조금 더 자주, 같은 칸은 피함
+      const prevSide = prev < mid ? -1 : prev > mid ? 1 : 0;
+      const want = rnd() < 0.65 ? -prevSide : prevSide;
+      const cand: number[] = [];
+      for (let l = 0; l < lanes; l++) if (l !== prev && free(l, n.t)) cand.push(l);
+      const good = cand.filter((l) => want === 0 || Math.sign(l - mid) === want || l === mid);
+      const pool = good.length ? good : cand;
+      if (pool.length) lane = pool[Math.floor(rnd() * pool.length)];
+    }
+    if (lane < 0) for (let l = 0; l < lanes; l++) if (free(l, n.t) && (l !== prev || gapPrev > 0.3)) { lane = l; break; }
+    if (lane < 0) continue; // 모든 칸이 길게 누르는 중
+    const len = n.len >= 0.35 ? n.len : 0;
+    out.push({ t: n.t, lane, len });
+    busy[lane] = n.t + len; lastAt[lane] = n.t;
+    prev = lane;
+    // 동시 누르기: 앞뒤로 여유가 있을 때만
+    const room = level === 'hard' ? 0.3 : 0.45;
+    const chance = level === 'hard' ? 0.45 : level === 'normal' ? 0.22 : 0;
+    if (len === 0 && gapPrev >= room && gapNext >= room && rnd() < chance) {
+      const extra = level === 'hard' && lanes >= 6 && gapNext >= 0.6 && rnd() < 0.3 ? 2 : 1;
+      const used = [lane];
+      for (let k = 0; k < extra; k++) {
+        const opts: number[] = [];
+        for (let l = 0; l < lanes; l++) if (!used.includes(l) && free(l, n.t) && used.every((u) => Math.abs(u - l) >= 2 || lanes <= 4)) opts.push(l);
+        if (!opts.length) break;
+        const l = opts[Math.floor(rnd() * opts.length)];
+        out.push({ t: n.t, lane: l, len: 0 }); used.push(l); lastAt[l] = n.t;
+      }
+    }
+  }
+  return out.sort((a, b) => a.t - b.t || a.lane - b.lane);
+}

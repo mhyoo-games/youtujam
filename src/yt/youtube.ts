@@ -50,7 +50,7 @@ export class YtClock {
   duration(): number {
     try { return this.player?.getDuration() ?? 0; } catch { return 0; }
   }
-  play(from = 0): void { this.player?.seekTo(from, true); this.player?.playVideo(); }
+  play(from = 0): void { this.lastOut = -Infinity; this.player?.seekTo(from, true); this.player?.playVideo(); }
   pause(): void { this.player?.pauseVideo(); }
   isPlaying(): boolean { return this.playing; }
 
@@ -65,12 +65,21 @@ export class YtClock {
     let raw = 0;
     try { raw = this.player.getCurrentTime(); } catch { return 0; }
     const now = performance.now();
-    if (!this.playing) { this.base = raw; this.baseAt = now; return raw; }
+    if (!this.playing) { this.base = raw; this.baseAt = now; this.lastOut = raw; return raw; }
     const est = this.base + (now - this.baseAt) / 1000;
-    if (Math.abs(raw - est) > 0.12) { this.base = raw; this.baseAt = now; }          // 건너뛰기·끊김
-    else if (raw !== this.lastRaw) { this.base = est + (raw - est) * 0.15; this.baseAt = now; } // 살살 맞추기
+    // 플레이어 값은 띄엄띄엄(브라우저에 따라 0.25초씩) 바뀌므로, 값이 바뀐 순간에만 비교해서 살살 따라간다.
+    // 크게 어긋날 때(앞으로 건너뛰기·멈췄다 다시)만 바로 맞춘다. 시계는 뒤로 가지 않게.
+    if (raw !== this.lastRaw) {
+      const err = raw - est;
+      if (Math.abs(err) > 0.5) { this.base = raw; this.baseAt = now; this.lastOut = -Infinity; }
+      else { this.base = est + err * 0.3; this.baseAt = now; }
+    }
     this.lastRaw = raw;
-    return this.base + (perfMs - this.baseAt) / 1000;
+    const t = this.base + (perfMs - this.baseAt) / 1000;
+    if (perfMs >= now && t < this.lastOut) return this.lastOut;
+    if (perfMs >= now) this.lastOut = t;
+    return t;
   }
   private lastRaw = -1;
+  private lastOut = -1;
 }
