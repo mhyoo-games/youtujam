@@ -1,0 +1,105 @@
+// 채보: 곡 이벤트에서 떨어질 노트를 만든다. 4건반/7건반, 쉬움·보통·어려움.
+import type { Song, Ev } from './music.ts';
+
+export interface Note { t: number; lane: number; len: number; ev?: number }   // t, len: 초 (len>0이면 길게 누르기). ev: 칠 때 나는 곡 소리(곡 이벤트 번호)
+export type Level = 'easy' | 'normal' | 'hard';
+export interface Chart { notes: Note[]; lanes: number; level: Level }
+
+export function beatSec(bpm: number): number { return 60 / bpm; }
+
+/** 음 높이를 건반 칸으로. 같은 칸이 너무 빨리 겹치지 않게 옆 칸으로 비킨다. */
+export function fromSong(song: Song, lanes: number, level: Level): Chart {
+  const spb = beatSec(song.bpm);
+  const lead = song.events.filter((e) => e.part === 'lead');
+  const lo = Math.min(...lead.map((e) => e.pitch)), hi = Math.max(...lead.map((e) => e.pitch));
+  const pick: Ev[] = [];
+  const index = new Map<Ev, number>();
+  song.events.forEach((e, i) => index.set(e, i));
+  for (const e of song.events) {
+    if (e.part === 'lead') {
+      if (level === 'easy' && Math.abs(e.t * 2 - Math.round(e.t * 2)) > 1e-6) continue; // 반 박에 걸친 것만
+      pick.push(e);
+    } else if (e.part === 'kick' && level !== 'easy') {
+      if (level === 'normal' && e.t % 1 !== 0) continue;
+      pick.push(e);
+    } else if (e.part === 'snare' && level === 'hard') pick.push(e);
+  }
+  pick.sort((a, b) => a.t - b.t);
+  const notes: Note[] = [];
+  const lastAt = new Array(lanes).fill(-99);
+  const busyUntil = new Array(lanes).fill(-99);
+  for (const e of pick) {
+    let lane: number;
+    if (e.part === 'lead') lane = Math.round(((e.pitch - lo) / Math.max(1, hi - lo)) * (lanes - 1));
+    else if (e.part === 'kick') lane = lanes === 7 ? 3 : 0;
+    else lane = lanes === 7 ? 6 : lanes - 1;
+    const t = e.t * spb;
+    // 같은 때 같은 칸이면 버림, 너무 가까우면 옆 칸
+    for (let k = 0; k < lanes; k++) {
+      const cand = (lane + (k % 2 ? (k + 1) / 2 : -k / 2) + lanes * 4) % lanes;
+      if (t - lastAt[cand] > spb * 0.24 && t > busyUntil[cand]) { lane = cand; break; }
+      if (k === lanes - 1) lane = -1;
+    }
+    if (lane < 0) continue;
+    if (notes.some((n) => Math.abs(n.t - t) < 1e-6 && n.lane === lane)) continue;
+    const long = e.part === 'lead' && e.dur >= (level === 'easy' ? 2 : 1.5) ? e.dur * spb * 0.85 : 0;
+    notes.push({ t, lane, len: long, ev: index.get(e) });
+    lastAt[lane] = t;
+    busyUntil[lane] = t + long;
+  }
+  // 한 때에 누르는 건반 수 제한 (쉬움 1, 보통 2, 어려움 3)
+  const maxChord = level === 'easy' ? 1 : level === 'normal' ? 2 : 3;
+  const out: Note[] = [];
+  for (const n of notes) {
+    const same = out.filter((o) => Math.abs(o.t - n.t) < 0.01).length;
+    if (same < maxChord) out.push(n);
+  }
+  return { notes: out, lanes, level };
+}
+
+/** 난이도 숫자(Lv): 초당 노트 수와 동시에 누르는 정도로 */
+export function levelNumber(chart: Chart, seconds: number): number {
+  if (!chart.notes.length || seconds <= 0) return 1;
+  const nps = chart.notes.length / seconds;
+  let chords = 0;
+  for (let i = 1; i < chart.notes.length; i++) if (Math.abs(chart.notes[i].t - chart.notes[i - 1].t) < 0.01) chords++;
+  const lv = nps * 1.6 + (chords / chart.notes.length) * 6 + (chart.lanes - 4) * 0.6;
+  return Math.max(1, Math.min(30, Math.round(lv)));
+}
+
+/** 유튜브처럼 소리를 분석할 수 없는 곡: BPM과 시작 위치로 박자에 맞춘 무늬를 만든다 (영상 id로 고정된 난수). */
+export function fromBeat(bpm: number, offset: number, duration: number, lanes: number, level: Level, seed: string): Chart {
+  let h = 2166136261;
+  for (const ch of seed) h = Math.imul(h ^ ch.charCodeAt(0), 16777619);
+  const rnd = () => ((h = Math.imul(h ^ (h >>> 15), 2246822507) ^ Math.imul(h ^ (h >>> 13), 3266489909)) >>> 0) / 4294967296;
+  const spb = beatSec(bpm);
+  const step = level === 'easy' ? 1 : level === 'normal' ? 0.5 : 0.25;
+  const notes: Note[] = [];
+  let lane = Math.floor(rnd() * lanes);
+  for (let b = 0; offset + b * spb < duration - 1; b += step) {
+    const t = offset + b * spb;
+    const bar = Math.floor(b / 4);
+    if (bar < 2) continue;                      // 처음 두 마디는 쉼
+    const strong = Math.abs(b - Math.round(b)) < 1e-6;
+    const keep = strong ? 0.92 : level === 'hard' ? 0.55 : 0.45;
+    if (rnd() > keep) continue;
+    lane = (lane + 1 + Math.floor(rnd() * (lanes - 1))) % lanes;
+    const long = strong && rnd() < 0.08 ? spb * (level === 'easy' ? 2 : 1) : 0;
+    notes.push({ t, lane, len: long });
+    if (b % 4 === 0 && level !== 'easy' && rnd() < 0.3) notes.push({ t, lane: (lane + Math.floor(lanes / 2)) % lanes, len: 0 });
+    if (long) b += Math.max(step, long / spb) - step;
+  }
+  return { notes: notes.sort((a, b) => a.t - b.t), lanes, level };
+}
+
+/** 직접 친 채보 정리: 너무 가까운 같은 칸은 합치고 시간순으로 */
+export function cleanRecorded(notes: Note[], lanes: number): Note[] {
+  const out: Note[] = [];
+  for (const n of [...notes].sort((a, b) => a.t - b.t)) {
+    if (n.lane < 0 || n.lane >= lanes) continue;
+    const prev = out.findLast((o) => o.lane === n.lane);
+    if (prev && n.t - prev.t < 0.06) continue;
+    out.push({ t: Math.round(n.t * 1000) / 1000, lane: n.lane, len: n.len > 0.25 ? Math.round(n.len * 1000) / 1000 : 0 });
+  }
+  return out;
+}
