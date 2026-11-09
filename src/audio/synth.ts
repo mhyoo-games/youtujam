@@ -106,6 +106,38 @@ export class Synth {
     return spb;
   }
 
+  /** 타격음: 누른 순간 바로 (톡·딱·착·쿵) */
+  tick(kind: string, vol = 0.6): void {
+    const c = this.ctx, at = c.currentTime;
+    if (c.state !== 'running' || kind === 'off' || vol <= 0) return;
+    const g = c.createGain(); g.connect(this.comp);
+    if (kind === 'tok') {        // 나무 두드리는 소리
+      const o = this.osc('sine', 1400, at, at + 0.06, g);
+      o.frequency.setValueAtTime(1400, at); o.frequency.exponentialRampToValueAtTime(700, at + 0.04);
+      g.gain.setValueAtTime(0.5 * vol, at); g.gain.exponentialRampToValueAtTime(0.001, at + 0.05);
+    } else if (kind === 'tak') { // 테두리 치는 소리
+      const o = this.osc('triangle', 1900, at, at + 0.04, g);
+      void o;
+      g.gain.setValueAtTime(0.35 * vol, at); g.gain.exponentialRampToValueAtTime(0.001, at + 0.03);
+      this.noiseHit(at, 'bandpass', 3200, 0.03, 0.5 * vol);
+    } else if (kind === 'chak') { // 닫힌 심벌
+      g.disconnect();
+      this.noiseHit(at, 'highpass', 6500, 0.045, 0.45 * vol);
+    } else if (kind === 'kung') { // 작은 북
+      const o = this.osc('sine', 200, at, at + 0.1, g);
+      o.frequency.setValueAtTime(200, at); o.frequency.exponentialRampToValueAtTime(60, at + 0.08);
+      g.gain.setValueAtTime(0.8 * vol, at); g.gain.exponentialRampToValueAtTime(0.001, at + 0.1);
+    }
+  }
+  private noiseHit(at: number, type: BiquadFilterType, f: number, len: number, peak: number): void {
+    const src = this.ctx.createBufferSource(); src.buffer = this.noise;
+    const fl = this.ctx.createBiquadFilter(); fl.type = type; fl.frequency.value = f;
+    const g = this.ctx.createGain();
+    src.connect(fl).connect(g).connect(this.comp);
+    g.gain.setValueAtTime(peak, at); g.gain.exponentialRampToValueAtTime(0.001, at + len);
+    src.start(at, Math.random() * 0.5); src.stop(at + len + 0.02);
+  }
+
   /** 곡이 아직 나오는 중인지 (미리듣기 반복용) */
   playing(): boolean {
     const s = this.song;

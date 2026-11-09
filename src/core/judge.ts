@@ -53,6 +53,22 @@ export function releaseGrade(early: number): Grade {
   return 'MISS';
 }
 
+/** 일찍/늦게: 20ms 넘게 어긋나면 알려 준다 (diff = 누른 시각 − 노트 시각) */
+export type Timing = 'FAST' | 'SLOW' | null;
+export function earlyLate(diff: number): Timing {
+  if (diff < -0.02) return 'FAST';
+  if (diff > 0.02) return 'SLOW';
+  return null;
+}
+
+/** 이번 판의 평균 오차(ms, 중앙값). 10번 넘게 친 뒤에만. + 이면 늘 늦게 친 것 */
+export function typicalOffsetMs(diffs: number[]): number | null {
+  const d = diffs.filter((x) => Math.abs(x) <= WINDOWS.GOOD);
+  if (d.length < 10) return null;
+  const s = [...d].sort((a, b) => a - b);
+  return Math.round(s[Math.floor(s.length / 2)] * 1000);
+}
+
 /** 정확도 0~100 */
 export function accuracy(t: Tally): number {
   const n = t.counts.PERFECT + t.counts.GREAT + t.counts.GOOD + t.counts.MISS;

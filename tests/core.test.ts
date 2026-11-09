@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { midi, parse, build } from '../src/core/music.ts';
 import { SONGS } from '../src/core/songs.ts';
 import { fromSong, fromBeat, cleanRecorded, levelNumber } from '../src/core/chart.ts';
-import { grade, releaseGrade, newTally, apply, accuracy, rank } from '../src/core/judge.ts';
+import { grade, releaseGrade, newTally, apply, accuracy, rank, earlyLate, typicalOffsetMs } from '../src/core/judge.ts';
 import { youtubeId, tapBpm, calibrate, KEYMAPS } from '../src/core/keys.ts';
 
 test('음 이름', () => {
@@ -272,4 +272,15 @@ test('리듬 채보는 어느 건반 수에서도 보임', () => {
   assert.equal(chartsFor(v, 7).length, 1);
   assert.equal(chartsFor(v, 4).length, 2);
   assert.equal(parseLib(JSON.stringify(lib)).videos[0].charts.length, 2, '저장했다 읽어도 남음');
+});
+
+test('FAST/SLOW와 평균 오차', () => {
+  assert.equal(earlyLate(-0.03), 'FAST');
+  assert.equal(earlyLate(0.03), 'SLOW');
+  assert.equal(earlyLate(0.01), null);
+  assert.equal(typicalOffsetMs([0.01, 0.02]), null, '너무 적으면 모름');
+  const late = Array.from({ length: 20 }, (_, i) => 0.015 + (i % 3) * 0.005);
+  late.push(0.5); // 엉뚱한 건 뺌
+  const ms = typicalOffsetMs(late)!;
+  assert.ok(ms >= 15 && ms <= 25, String(ms));
 });

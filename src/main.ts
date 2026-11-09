@@ -2,7 +2,7 @@
 import { SONGS } from './core/songs.ts';
 import type { Song } from './core/music.ts';
 import { fromSong, fromBeat, cleanRecorded, levelNumber, arrangeTaps, type Chart, type Note, type Level } from './core/chart.ts';
-import { grade, releaseGrade, newTally, apply, accuracy, rank, WINDOWS, type Grade, type Tally } from './core/judge.ts';
+import { grade, releaseGrade, newTally, apply, accuracy, rank, WINDOWS, earlyLate, typicalOffsetMs, type Grade, type Tally } from './core/judge.ts';
 import { KEYMAPS, KEYLABEL, youtubeId, tapBpm, calibrate } from './core/keys.ts';
 import { Synth, Sfx } from './audio/synth.ts';
 import { YtClock } from './yt/youtube.ts';
@@ -10,7 +10,8 @@ import * as Lib from './core/library.ts';
 
 const W = 960, H = 540;
 const cv = document.getElementById('c') as HTMLCanvasElement;
-const g = cv.getContext('2d')!;
+// desynchronized: 화면에 그리는 지연을 줄인다 (지원하는 브라우저만)
+const g = (cv.getContext('2d', { desynchronized: true, alpha: false }) ?? cv.getContext('2d'))!;
 const wrap = document.getElementById('wrap')!;
 const ytBox = document.getElementById('yt')!;
 const form = document.getElementById('form')!;
@@ -60,13 +61,18 @@ const sfx = new Sfx(synth, './');
 const yt = new YtClock();
 
 // ── 설정 (브라우저에 저장) ──
-interface Settings { lanes: number; speed: number; offset: number; noFail: boolean; level: Level; hitSound: boolean }
-const DEF: Settings = { lanes: 4, speed: 2.5, offset: 0, noFail: false, level: 'normal', hitSound: true };
+interface Settings { lanes: number; speed: number; offset: number; noFail: boolean; level: Level; hitSound: string; hitVol: number; meter: boolean }
+const DEF: Settings = { lanes: 4, speed: 2.5, offset: 0, noFail: false, level: 'normal', hitSound: 'tok', hitVol: 0.6, meter: true };
+const HIT_SOUNDS = ['tok', 'tak', 'chak', 'kung', 'off'];
+const HIT_KO: Record<string, string> = { tok: '톡 (나무)', tak: '딱 (테두리)', chak: '착 (심벌)', kung: '쿵 (북)', off: '끔' };
 function loadJson<T>(k: string, d: T): T {
   try { const v = localStorage.getItem(k); return v ? { ...d, ...JSON.parse(v) } : d; } catch { return d; }
 }
 function saveJson(k: string, v: unknown): void { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* */ } }
 const set: Settings = loadJson('yj_settings', DEF);
+// 예전엔 타격음이 켬/끔이었음
+if (typeof (set.hitSound as unknown) === 'boolean') set.hitSound = (set.hitSound as unknown) ? 'tok' : 'off';
+if (!HIT_SOUNDS.includes(set.hitSound)) set.hitSound = 'tok';
 const best: Record<string, { score: number; rank: string }> = loadJson('yj_best', {});
 
 // ── 그리기 도우미 ──
@@ -130,7 +136,7 @@ interface Play {
   chart: Chart; notes: PNote[]; tally: Tally; mode: 'own' | 'yt' | 'record';
   song?: Song; ytId?: string; chartId?: string; leadUntil: number; tap: boolean; tapDown: Map<string, number>; title: string; length: number; end: number;
   lastGrade: Grade | null; gradeAt: number; held: boolean[]; flashes: Array<{ lane: number; at: number; g: Grade }>;
-  rec: Note[]; recDown: number[]; paused: boolean; jamAt: number; bursts: Array<{ lane: number; at: number }>;
+  rec: Note[]; recDown: number[]; paused: boolean; jamAt: number; bursts: Array<{ lane: number; at: number; g: Grade }>; diffs: number[]; hitsFx: Array<{ d: number; at: number }>; lastDiff: number; pressAt: number[];
 }
 let play: Play | null = null;
 
@@ -164,19 +170,22 @@ function startOwn(song: Song): void {
 function newPlay(chart: Chart, mode: Play['mode'], title: string, length: number): Play {
   const notes = chart.notes.map((n) => ({ ...n, done: false, holding: false, tailDone: n.len <= 0, hitAt: 0 }));
   const total = notes.length + notes.filter((n) => n.len > 0).length;
-  return { chart, notes, tally: newTally(total), mode, title, length, end: length + 1.5, lastGrade: null, gradeAt: -9, held: new Array(chart.lanes).fill(false), flashes: [], rec: [], recDown: new Array(chart.lanes).fill(-1), paused: false, jamAt: -9999, bursts: [], leadUntil: 0, tap: false, tapDown: new Map() };
+  return { chart, notes, tally: newTally(total), mode, title, length, end: length + 1.5, lastGrade: null, gradeAt: -9, held: new Array(chart.lanes).fill(false), flashes: [], rec: [], recDown: new Array(chart.lanes).fill(-1), paused: false, jamAt: -9999, bursts: [], leadUntil: 0, tap: false, tapDown: new Map(), diffs: [], hitsFx: [], lastDiff: 0, pressAt: new Array(chart.lanes).fill(-9999) };
 }
 
-function judge(p: Play, gr: Grade, lane: number, burst = true): void {
+function judge(p: Play, gr: Grade, lane: number, burst = true, diff: number | null = null): void {
   if (apply(p.tally, gr, set.noFail)) { p.jamAt = performance.now(); sfx.play('switch-a', 0.25); }
   p.lastGrade = gr; p.gradeAt = performance.now();
-  if (gr !== 'MISS') { p.flashes.push({ lane, at: performance.now(), g: gr }); if (burst) p.bursts.push({ lane, at: performance.now() }); }
+  p.lastDiff = diff ?? 0;
+  if (diff !== null) { p.diffs.push(diff); p.hitsFx.push({ d: diff, at: performance.now() }); if (p.hitsFx.length > 30) p.hitsFx.shift(); }
+  if (gr !== 'MISS') { p.flashes.push({ lane, at: performance.now(), g: gr }); if (burst) p.bursts.push({ lane, at: performance.now(), g: gr }); }
 }
 
 function press(lane: number, at = performance.now()): void {
   const p = play!;
   const now = clock(Math.min(at, performance.now()));
   p.held[lane] = true;
+  p.pressAt[lane] = performance.now();
   if (p.mode === 'record') { p.recDown[lane] = now; hit(); return; }
   // 이 칸에서 가장 이른, 아직 안 친 노트
   let best: PNote | null = null;
@@ -189,7 +198,7 @@ function press(lane: number, at = performance.now()): void {
   const gr = grade(now - best.t);
   if (!gr) { hit(); return; }
   best.done = true; best.hitAt = now;
-  judge(p, gr, lane);
+  judge(p, gr, lane, true, gr === 'MISS' ? null : now - best.t);
   if (best.len > 0 && gr !== 'MISS') best.holding = true;
   else if (best.len > 0) { best.tailDone = true; judge(p, 'MISS', lane); }
   if (best.ev !== undefined && p.mode === 'own') synth.keysound(best.ev); // 키음
@@ -211,7 +220,7 @@ function tapUp(p: Play, code: string, at = performance.now()): void {
   p.rec.push({ t: down, lane: 0, len: now - down >= 0.35 ? now - down : 0 });
   if (!p.tapDown.size) p.held.fill(false);
 }
-function hit(): void { if (set.hitSound) sfx.play('tap-a', 0.12); }
+function hit(): void { synth.tick(set.hitSound, set.hitVol); }
 
 function release(lane: number, at = performance.now()): void {
   const p = play!;
@@ -270,9 +279,11 @@ function finish(): void {
   if (!p.tally.failed && (!old || p.tally.score > old.score)) { best[key] = { score: p.tally.score, rank: rank(p.tally) }; saveJson('yj_best', best); resultNew = true; } else resultNew = false;
   sfx.play('switch-a', 0.5);
   ytBox.style.display = 'none';
+  resultMsg = '';
   screen = 'result';
 }
 let resultNew = false;
+let resultMsg = '';
 
 // ── 판(노트가 떨어지는 칸) 그리기: 쇠틀, 흰·파랑 막대 노트, 판정선 불꽃, 잼 게이지 ──
 const HIT_Y = 440;
@@ -378,7 +389,18 @@ function field(p: Play, x0: number): void {
   // 판정선 불꽃
   g.save(); g.globalCompositeOperation = 'lighter';
   p.bursts = p.bursts.filter((f) => ms - f.at < 240);
-  for (const f of p.bursts) burst(x0 + f.lane * lw + lw / 2, hitY, (ms - f.at) / 240, HEX[LANE_COLOR[lanes][f.lane]], lw);
+  // 판정이 좋을수록 크게: PERFECT는 하얀 고리까지
+  for (const f of p.bursts) {
+    const k = (ms - f.at) / 240, cx = x0 + f.lane * lw + lw / 2;
+    const size = f.g === 'PERFECT' ? lw * 1.15 : f.g === 'GREAT' ? lw * 0.85 : lw * 0.55;
+    burst(cx, hitY, k, f.g === 'PERFECT' ? '#ffe36b' : HEX[LANE_COLOR[lanes][f.lane]], size);
+    if (f.g === 'PERFECT' && k < 0.6) { g.strokeStyle = `rgba(255,255,255,${0.9 - k * 1.5})`; g.lineWidth = 3; g.beginPath(); g.ellipse(cx, hitY, lw * (0.3 + k), lw * (0.15 + k * 0.4), 0, 0, Math.PI * 2); g.stroke(); }
+  }
+  // 누른 칸의 판정선이 번쩍 (노트가 없어도)
+  for (let i = 0; i < lanes; i++) {
+    const k = (ms - p.pressAt[i]) / 120;
+    if (k < 1) { g.fillStyle = `rgba(255,255,255,${0.8 * (1 - k)})`; g.fillRect(x0 + i * lw + 2, hitY - 4, lw - 4, 8); }
+  }
   for (const n of p.notes) if (n.holding && ms % 90 < 45) burst(x0 + n.lane * lw + lw / 2, hitY, 0.3, HEX[LANE_COLOR[lanes][n.lane]], lw * 0.8);
   g.restore();
   p.flashes = p.flashes.filter((f) => ms - f.at < 200);
@@ -410,13 +432,39 @@ function field(p: Play, x0: number): void {
     const col = { PERFECT: '#ffe36b', GREAT: '#6bd0ff', GOOD: '#9cf59c', MISS: '#ff6b7b' }[p.lastGrade];
     text(p.lastGrade, cx, 230, Math.min(30, fw / 9) * pop, col, 'center', 'KFuture');
     if (p.tally.combo >= 2 && p.lastGrade !== 'MISS') text(String(p.tally.combo), cx, 284, 52 * (1 + Math.max(0, 0.1 - since) * 2), '#ffffff', 'center', 'GalmuriB');
+    const tm = p.lastGrade !== 'MISS' ? earlyLate(p.lastDiff) : null;
+    if (set.meter && tm) text(`${tm} ${p.lastDiff > 0 ? '+' : ''}${Math.round(p.lastDiff * 1000)}ms`, cx, 326, 13, tm === 'FAST' ? '#6bd0ff' : '#ff9a6b', 'center', 'GalmuriB');
   }
+  if (set.meter) errorMeter(p, x0, fw, hitY + 70);
   if (p.tally.jamCombo > 0) {
     const js = (ms - p.jamAt) / 1000;
     const pop = js < 0.3 ? 1 + (0.3 - js) * 1.5 : 1;
     text(`JAM x${p.tally.jamCombo}`, cx, 175, 18 * pop, js < 0.3 && ms % 120 < 60 ? '#ffffff' : '#ff8ad0', 'center', 'KFuture');
   }
 }
+/** 판정 오차 막대: 가운데가 딱 맞음, 왼쪽 일찍·오른쪽 늦게. 최근 친 것들이 눈금으로 남는다 */
+function errorMeter(p: Play, x0: number, fw: number, y: number): void {
+  const cx = x0 + fw / 2, half = Math.min(fw / 2 - 6, 120);
+  const X = (d: number) => cx + Math.max(-1, Math.min(1, d / WINDOWS.GOOD)) * half;
+  g.fillStyle = 'rgba(0,0,0,0.6)'; g.fillRect(cx - half - 2, y, half * 2 + 4, 10);
+  g.fillStyle = 'rgba(156,245,156,0.45)'; g.fillRect(X(-WINDOWS.GOOD), y + 3, X(WINDOWS.GOOD) - X(-WINDOWS.GOOD), 4);
+  g.fillStyle = 'rgba(107,208,255,0.6)'; g.fillRect(X(-WINDOWS.GREAT), y + 3, X(WINDOWS.GREAT) - X(-WINDOWS.GREAT), 4);
+  g.fillStyle = 'rgba(255,227,107,0.85)'; g.fillRect(X(-WINDOWS.PERFECT), y + 3, X(WINDOWS.PERFECT) - X(-WINDOWS.PERFECT), 4);
+  g.fillStyle = '#fff'; g.fillRect(cx - 1, y - 1, 2, 12);
+  const ms = performance.now();
+  for (const h of p.hitsFx) {
+    const a = 1 - (ms - h.at) / 3000;
+    if (a <= 0) continue;
+    g.fillStyle = `rgba(255,255,255,${a})`; g.fillRect(X(h.d) - 1, y, 2, 10);
+  }
+  // 최근 평균 위치 (▼)
+  const recent = p.hitsFx.filter((h) => ms - h.at < 3000);
+  if (recent.length >= 3) {
+    const avg = recent.reduce((s2, h) => s2 + h.d, 0) / recent.length;
+    g.fillStyle = '#ff4fa8'; g.beginPath(); g.moveTo(X(avg) - 4, y - 6); g.lineTo(X(avg) + 4, y - 6); g.lineTo(X(avg), y - 1); g.fill();
+  }
+}
+
 /** 판정선에서 퍼지는 불꽃 */
 function burst(x: number, y: number, k: number, col: string, size: number): void {
   const r = size * (0.4 + k * 0.9);
@@ -595,18 +643,18 @@ function drawSelect(): void {
   text('Enter 시작 · Esc 뒤로 · 고른 곡의 후렴을 미리 들려줍니다', W / 2, 520, 12, '#a9a4c8', 'center');
 }
 
-const SET_ROWS = ['건반 수', '난이도', '노트 속도', '판정 맞추기 (ms)', '자동으로 맞추기 (박자에 맞춰 Space)', '타격음', '체력 0이 돼도 계속', '돌아가기'];
+const SET_ROWS = ['건반 수', '난이도', '노트 속도', '판정 맞추기 (ms)', '자동으로 맞추기 (박자에 맞춰 Space)', '타격음', '타격음 크기', '판정 오차 막대 (FAST·SLOW)', '체력 0이 돼도 계속', '돌아가기'];
 function drawSettings(): void {
   background(performance.now() / 1000);
   text('설정', 30, 34, 22, '#fff', 'left', 'GalmuriB');
-  const vals = [`${set.lanes}건반`, { easy: '쉬움', normal: '보통', hard: '어려움' }[set.level], `×${set.speed.toFixed(1)}`, `${set.offset > 0 ? '+' : ''}${set.offset}`, '', set.hitSound ? '켬' : '끔', set.noFail ? '켬' : '끔', ''];
+  const vals = [`${set.lanes}건반`, { easy: '쉬움', normal: '보통', hard: '어려움' }[set.level], `×${set.speed.toFixed(1)}`, `${set.offset > 0 ? '+' : ''}${set.offset}`, '', HIT_KO[set.hitSound], `${Math.round(set.hitVol * 100)}%`, set.meter ? '켬' : '끔', set.noFail ? '켬' : '끔', ''];
   SET_ROWS.forEach((r, i) => {
-    const y = 70 + i * 52;
+    const y = 62 + i * 42;
     const on = i === cursor;
-    nine(img(on ? 'yellow_button_rectangle_depth_gloss' : 'grey_button_rectangle_depth_flat'), 180, y, 600, 44, 16);
-    hitRow(i, 180, y, 600, 44);
-    text(r, 210, y + 20, 16, on ? '#3b2a00' : '#2a2440');
-    if (vals[i]) text(`◀ ${vals[i]} ▶`, 750, y + 20, 16, on ? '#3b2a00' : '#2a2440', 'right');
+    nine(img(on ? 'yellow_button_rectangle_depth_gloss' : 'grey_button_rectangle_depth_flat'), 180, y, 600, 36, 14);
+    hitRow(i, 180, y, 600, 36);
+    text(r, 210, y + 16, 15, on ? '#3b2a00' : '#2a2440');
+    if (vals[i]) text(`◀ ${vals[i]} ▶`, 750, y + 16, 15, on ? '#3b2a00' : '#2a2440', 'right');
   });
   text(settingsMsg || '판정 맞추기: 늘 늦게 맞으면 +, 일찍 맞으면 − 쪽으로. 모르겠으면 "자동으로 맞추기"', W / 2, 505, 12, settingsMsg ? '#ffd75a' : '#a9a4c8', 'center');
 }
@@ -798,6 +846,11 @@ function drawResult(): void {
     text(k, 500, 135 + i * 44, 18, '#2a2440', 'left', i > 2 ? 'KFuture' : 'GalmuriB');
     text(v, 860, 135 + i * 44, 22, c === '#fff' ? '#2a2440' : c, 'right', 'KFuture');
   });
+  const off = typicalOffsetMs(p.diffs);
+  if (off !== null && p.mode !== 'record') {
+    const msg = Math.abs(off) < 8 ? `타이밍이 잘 맞았어요 (평균 ${off > 0 ? '+' : ''}${off}ms)` : `평균 ${Math.abs(off)}ms ${off > 0 ? '늦게' : '일찍'} 쳤어요 · O 누르면 판정 맞추기에 반영`;
+    text(resultMsg || msg, 260, 410, 13, resultMsg ? '#9cf59c' : '#cfd3ea', 'center');
+  }
   text('Enter 다시 하기 · Esc 곡 고르기', W / 2, 500, 14, '#cfd3ea', 'center');
 }
 
@@ -966,12 +1019,17 @@ function key(code: string, down: boolean, repeat: boolean, at = performance.now(
         if (cursor === 1) set.level = cycle<Level>(['easy', 'normal', 'hard'], set.level, d);
         if (cursor === 2) set.speed = Math.max(1, Math.min(6, Math.round((set.speed + d * 0.5) * 10) / 10));
         if (cursor === 3) set.offset = Math.max(-300, Math.min(300, set.offset + d * 10));
-        if (cursor === 5) set.hitSound = !set.hitSound;
-        if (cursor === 6) set.noFail = !set.noFail;
-        saveJson('yj_settings', set); moveSfx();
+        if (cursor === 5) set.hitSound = cycle(HIT_SOUNDS, set.hitSound, d);
+        if (cursor === 6) set.hitVol = Math.max(0.2, Math.min(1, Math.round((set.hitVol + d * 0.2) * 10) / 10));
+        if (cursor === 7) set.meter = !set.meter;
+        if (cursor === 8) set.noFail = !set.noFail;
+        saveJson('yj_settings', set);
+        if (cursor === 5 || cursor === 6) synth.resume().then(() => synth.tick(set.hitSound, set.hitVol)); // 들어 보기
+        else moveSfx();
       }
+      if (ok && (cursor === 5 || cursor === 6)) synth.resume().then(() => synth.tick(set.hitSound, set.hitVol));
       if (ok && cursor === 4) startCalib();
-      if (back || (ok && cursor === 7)) { screen = 'title'; cursor = 1; settingsMsg = ''; }
+      if (back || (ok && cursor === 9)) { screen = 'title'; cursor = 1; settingsMsg = ''; }
       break;
     }
     case 'yt': {
@@ -1022,6 +1080,13 @@ function key(code: string, down: boolean, repeat: boolean, at = performance.now(
       break;
     }
     case 'result':
+      if (code === 'KeyO' && play && !resultMsg) {
+        const off = typicalOffsetMs(play.diffs);
+        if (off !== null && Math.abs(off) >= 8) {
+          set.offset = Math.max(-300, Math.min(300, set.offset + off)); saveJson('yj_settings', set);
+          resultMsg = `판정 맞추기를 ${set.offset > 0 ? '+' : ''}${set.offset}ms로 바꿨어요.`; sfx.play('switch-a', 0.4);
+        }
+      }
       if (ok && play) { if (play.song) startOwn(play.song); else ytStart(lastYtMode, lastChartId); }
       if (back) { if (play && !play.song) enterYt(R.mine); else back2select(); }
       break;
@@ -1053,7 +1118,7 @@ cv.addEventListener('pointerdown', (e) => {
     if (play.tap) { tapDownAt(play, 'p' + e.pointerId, e.timeStamp); return; }
     const [x0, lw] = lanesX(play);
     const lane = Math.floor((x - x0) / lw);
-    if (lane >= 0 && lane < play.chart.lanes) { touchLane.set(e.pointerId, lane); press(lane, e.timeStamp); }
+    if (lane >= 0 && lane < play.chart.lanes) { touchLane.set(e.pointerId, lane); press(lane, e.timeStamp); if (e.pointerType === 'touch') navigator.vibrate?.(8); }
     return;
   }
   if (screen === 'calib') { calibTap(e.timeStamp); return; }
