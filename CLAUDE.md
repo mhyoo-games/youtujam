@@ -5,7 +5,7 @@
 ## 무엇인가
 
 웹 건반 리듬 게임 (4·5·6·7건반). 자체곡(브라우저에서 합성)과 유튜브 영상 음악으로 할 수 있다.
-GitHub Pages(`https://minhyuk94.github.io/youtujam/`)에 올린다.
+GitHub Pages(`https://mhyoo-games.github.io/youtujam/`, 조직 mhyoo-games)에 올린다.
 
 ## 지킬 것
 
@@ -21,6 +21,7 @@ GitHub Pages(`https://minhyuk94.github.io/youtujam/`)에 올린다.
 - 소리: 곡마다 볼륨 줄(bus)을 새로 만들어, 곡을 바꾸면 예약된 소리까지 바로 끊는다(미리듣기가 겹쳐 밀리지 않게).
 - 시계: 자체곡은 `AudioContext.getOutputTimestamp`로 스피커 시각과 화면 시각을 이어 붙이고, 판정은 키 이벤트의 `timeStamp`로 한다.
 - CI(`ci.yml`): 테스트 → 타입 검사 → 빌드 → headless Chrome으로 켜지는지 → Pages 배포.
+- 예전 주소(`minhyuk94.github.io/…`)에서 옮겨 올 때 저장을 받아 넣는 `carry.js`(예전 주소의 안내 페이지가 `#carry=`로 보냄)를 `<head>` 맨 앞에서 읽는다. 지우지 않는다.
 - 큰 기능이 바뀌면 이력서 저장소(minhyuk94.github.io)의 `games` 카드도 ko/ja/en으로 맞춘다. 소스 코드·저장소 링크는 이력서에 넣지 않는다.
 
 ## 이 작업 환경에서 돌려 보기

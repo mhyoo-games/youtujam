@@ -2,7 +2,7 @@
 
 떨어지는 노트를 박자에 맞춰 치는 웹 건반 리듬 게임입니다. 2000년대 PC방에서 하던 온라인 리듬 게임의 손맛을 떠올리며 새로 만들었습니다.
 
-**하러 가기:** https://minhyuk94.github.io/youtujam/
+**하러 가기:** https://mhyoo-games.github.io/youtujam/
 
 ## 할 수 있는 것
 
