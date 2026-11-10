@@ -2,6 +2,7 @@
 import { SONGS } from './core/songs.ts';
 import type { Song } from './core/music.ts';
 import { fromSong, fromBeat, cleanRecorded, levelNumber, arrangeTaps, type Chart, type Note, type Level } from './core/chart.ts';
+import { type Style, STYLE_KO, STYLE_DESC, lanesFor, hammerLane, orbitKey, squeeze, toOrbit, orbitPath, orbitAt, type Tile } from './core/styles.ts';
 import { grade, releaseGrade, newTally, apply, accuracy, rank, WINDOWS, earlyLate, typicalOffsetMs, type Grade, type Tally } from './core/judge.ts';
 import { KEYMAPS, KEYLABEL, youtubeId, tapBpm, calibrate } from './core/keys.ts';
 import { Synth, Sfx } from './audio/synth.ts';
@@ -78,8 +79,8 @@ const sfx = new Sfx(synth, './');
 const yt = new YtClock();
 
 // ── 설정 (브라우저에 저장) ──
-interface Settings { lanes: number; speed: number; offset: number; noFail: boolean; level: Level; hitSound: string; hitVol: number; meter: boolean; mobile: string; vibrate: boolean }
-const DEF: Settings = { lanes: 4, speed: 2.5, offset: 0, noFail: false, level: 'normal', hitSound: 'tok', hitVol: 0.6, meter: true, mobile: 'auto', vibrate: true };
+interface Settings { style: Style; lanes: number; speed: number; offset: number; noFail: boolean; level: Level; hitSound: string; hitVol: number; meter: boolean; mobile: string; vibrate: boolean }
+const DEF: Settings = { style: 'keys', lanes: 4, speed: 2.5, offset: 0, noFail: false, level: 'normal', hitSound: 'tok', hitVol: 0.6, meter: true, mobile: 'auto', vibrate: true };
 const HIT_SOUNDS = ['tok', 'tak', 'chak', 'kung', 'off'];
 const HIT_KO: Record<string, string> = { tok: '톡 (나무)', tak: '딱 (테두리)', chak: '착 (심벌)', kung: '쿵 (북)', off: '끔' };
 function loadJson<T>(k: string, d: T): T {
@@ -87,6 +88,23 @@ function loadJson<T>(k: string, d: T): T {
 }
 function saveJson(k: string, v: unknown): void { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* */ } }
 const set: Settings = loadJson('yj_settings', DEF);
+if (!['keys', 'hammer', 'orbit'].includes(set.style)) set.style = 'keys';
+/** 건반 4·5·6·7 → 망치 → 궤도 를 한 줄로 돌려 고른다 */
+const KINDS: Array<[Style, number]> = [['keys', 4], ['keys', 5], ['keys', 6], ['keys', 7], ['hammer', 0], ['orbit', 0]];
+function kindLabel(): string { return set.style === 'keys' ? `${set.lanes}건반` : STYLE_KO[set.style]; }
+function cycleKind(d: number): void {
+  const i = KINDS.findIndex(([st, l]) => st === set.style && (st !== 'keys' || l === set.lanes));
+  const [st, l] = KINDS[(i + d + KINDS.length) % KINDS.length];
+  set.style = st; if (st === 'keys') set.lanes = l;
+  saveJson('yj_settings', set);
+}
+/** 지금 방식의 칸 수 */
+function playLanes(): number { return lanesFor(set.style, set.lanes); }
+/** 자체곡 채보 (방식에 맞춰) */
+function songChart(song: Song, level: Level): Chart {
+  if (set.style === 'orbit') return { notes: toOrbit(fromSong(song, 1, level).notes, song.bpm, level), lanes: 1, level };
+  return fromSong(song, playLanes(), level);
+}
 // 예전엔 타격음이 켬/끔이었음
 if (typeof (set.hitSound as unknown) === 'boolean') set.hitSound = (set.hitSound as unknown) ? 'tok' : 'off';
 if (!HIT_SOUNDS.includes(set.hitSound)) set.hitSound = 'tok';
@@ -186,6 +204,7 @@ interface Play {
   chart: Chart; notes: PNote[]; tally: Tally; mode: 'own' | 'yt' | 'record';
   song?: Song; ytId?: string; chartId?: string; leadUntil: number; tap: boolean; tapDown: Map<string, number>; title: string; length: number; end: number;
   lastGrade: Grade | null; gradeAt: number; held: boolean[]; flashes: Array<{ lane: number; at: number; g: Grade }>;
+  style: Style; bpm: number; tiles: Tile[]; cam: { x: number; y: number; at: number };
   rec: Note[]; recDown: number[]; paused: boolean; jamAt: number; bursts: Array<{ lane: number; at: number; g: Grade }>; diffs: number[]; hitsFx: Array<{ d: number; at: number }>; lastDiff: number; pressAt: number[];
 }
 let play: Play | null = null;
@@ -226,7 +245,7 @@ function placeYt(x: number, y: number, w: number, h: number): void {
 function keyName(lanes: number, i: number): string { return KEYLABEL[KEYMAPS[lanes][i]] ?? '?'; }
 
 function startOwn(song: Song): void {
-  const chart = fromSong(song, set.lanes, set.level);
+  const chart = songChart(song, set.level);
   // 노트가 된 소리는 반주에서 빼고, 칠 때 낸다 (키음)
   const skip = new Set(chart.notes.map((n) => n.ev).filter((e): e is number => e !== undefined));
   synth.resume().then(() => {
@@ -234,14 +253,20 @@ function startOwn(song: Song): void {
     synth.play(song, 2.2, { skip });
     play = newPlay(chart, 'own', song.title, (song.beats * 60) / song.bpm);
     play.song = song;
+    setStyle(play, set.style, song.bpm);
     screen = 'play';
   });
 }
 
+/** 방식 정하기: 궤도는 박자로 길을 만든다 */
+function setStyle(p: Play, style: Style, bpm: number): void {
+  p.style = style; p.bpm = bpm;
+  if (style === 'orbit') { p.tiles = orbitPath(p.chart.notes, bpm, { turns: p.chart.level === 'hard' }); p.cam = { x: 0, y: 0, at: 0 }; }
+}
 function newPlay(chart: Chart, mode: Play['mode'], title: string, length: number): Play {
   const notes = chart.notes.map((n) => ({ ...n, done: false, holding: false, tailDone: n.len <= 0, hitAt: 0 }));
   const total = notes.length + notes.filter((n) => n.len > 0).length;
-  return { chart, notes, tally: newTally(total), mode, title, length, end: length + 1.5, lastGrade: null, gradeAt: -9, held: new Array(chart.lanes).fill(false), flashes: [], rec: [], recDown: new Array(chart.lanes).fill(-1), paused: false, jamAt: -9999, bursts: [], leadUntil: 0, tap: false, tapDown: new Map(), diffs: [], hitsFx: [], lastDiff: 0, pressAt: new Array(chart.lanes).fill(-9999) };
+  return { chart, notes, tally: newTally(total), style: 'keys', bpm: 120, tiles: [], cam: { x: 0, y: 0, at: 0 }, mode, title, length, end: length + 1.5, lastGrade: null, gradeAt: -9, held: new Array(chart.lanes).fill(false), flashes: [], rec: [], recDown: new Array(chart.lanes).fill(-1), paused: false, jamAt: -9999, bursts: [], leadUntil: 0, tap: false, tapDown: new Map(), diffs: [], hitsFx: [], lastDiff: 0, pressAt: new Array(chart.lanes).fill(-9999) };
 }
 
 function judge(p: Play, gr: Grade, lane: number, burst = true, diff: number | null = null): void {
@@ -626,8 +651,281 @@ function bga(p: Play, x: number, y: number, w: number, h: number): void {
 }
 
 const LEVEL_KO: Record<Level, string> = { easy: '쉬움', normal: '보통', hard: '어려움' };
+// ════════════ 망치·궤도 방식 그리기 ════════════
+const GRADE_COL: Record<Grade, string> = { PERFECT: '#ffe36b', GREAT: '#6bd0ff', GOOD: '#9cf59c', MISS: '#ff6b7b' };
+/** 오른쪽 정보 자리: 제목, 배경 무대 또는 유튜브 영상(늘 보이게), 점수·정확도·진행·잼 게이지 */
+function panelX(): [number, number] { const sw = Math.min(phone() ? 360 : 400, Math.round(VW * 0.36)); return [VW - sw - 16, sw]; }
+function sidePanel(p: Play, now: number): [number, number] {
+  const [sx, sw] = panelX();
+  const vh = Math.round((sw * 9) / 16);
+  const lv = levelNumber(p.chart, p.length);
+  text(fit2(p.title, sw - 10, 18), sx, 24, 18, '#fff', 'left', 'GalmuriB');
+  text(fit2(`${STYLE_KO[p.style]} · ${LEVEL_KO[p.chart.level]} · Lv.${lv}${p.song ? ` · BPM ${p.song.bpm}` : ''}`, sw, 12), sx, 46, 12, '#ffd75a');
+  if (p.mode === 'own') bga(p, sx, 58, sw, vh); else placeYt(sx, 58, sw, vh);
+  const py = 58 + vh + 12;
+  nine(img('grey_button_rectangle_depth_flat'), sx, py, sw, 112, 16);
+  text('SCORE', sx + 16, py + 22, 11, '#4a4466', 'left', 'KFuture');
+  text(String(p.tally.score).padStart(7, '0'), sx + sw - 16, py + 26, 26, '#2a2440', 'right', 'KFuture');
+  text(fit2(`정확도 ${accuracy(p.tally).toFixed(1)}%   최대 콤보 ${p.tally.maxCombo}   JAM ${p.tally.jamCombo}`, sw - 32, 12), sx + 16, py + 56, 12, '#2a2440');
+  const prog = Math.max(0, Math.min(1, now / p.length));
+  g.fillStyle = '#b9bdd3'; g.fillRect(sx + 16, py + 74, sw - 32, 6);
+  g.fillStyle = '#ff4fa8'; g.fillRect(sx + 16, py + 74, (sw - 32) * prog, 6);
+  // 체력·잼 게이지
+  g.fillStyle = '#2a2440'; g.fillRect(sx + 16, py + 88, sw - 32, 10);
+  g.fillStyle = p.tally.life > 30 ? '#4fe08a' : '#ff5a6e'; g.fillRect(sx + 17, py + 89, ((sw - 34) / 2) * Math.max(0, p.tally.life) / 100, 8);
+  const jg = g.createLinearGradient(sx + sw / 2, 0, sx + sw - 16, 0); jg.addColorStop(0, '#ff4fa8'); jg.addColorStop(1, '#ffd75a');
+  g.fillStyle = jg; g.fillRect(sx + sw / 2 + 1, py + 89, ((sw - 34) / 2) * Math.min(1, p.tally.jam / 100), 8);
+  text('체력', sx + 18, py + 104, 9, '#4a4466'); text('JAM', sx + sw / 2 + 2, py + 104, 9, '#4a4466', 'left', 'KFuture');
+  if (phone() || coarse) { button('Ⅱ', 12, 8, 70, 40, false, 'grey'); hitAct(8, 4, 78, 48, pauseGame); }
+  return [sx, sw];
+}
+/** 판정 글자·콤보 (방식 공통) */
+function gradePop(p: Play, x: number, y: number, size = 30): void {
+  const ms = performance.now(), since = (ms - p.gradeAt) / 1000;
+  if (p.lastGrade && since < 0.7) {
+    const pop = 1 + Math.max(0, 0.12 - since) * 3;
+    text(p.lastGrade, x, y, size * pop, GRADE_COL[p.lastGrade], 'center', 'KFuture');
+    if (p.tally.combo >= 2 && p.lastGrade !== 'MISS') text(String(p.tally.combo), x, y + size * 1.5, size * 1.5, '#ffffff', 'center', 'GalmuriB');
+    const tm = p.lastGrade !== 'MISS' && p.lastGrade !== 'PERFECT' ? earlyLate(p.lastDiff) : null;
+    if (tm && set.meter) text(tm, x, y - size * 0.9, 12, tm === 'FAST' ? '#6bd0ff' : '#ff9a6b', 'center', 'KFuture');
+  }
+  if (p.tally.jamCombo > 0) { const js = (ms - p.jamAt) / 1000; text(`JAM x${p.tally.jamCombo}`, x, y - size * 1.8, 16 * (1 + Math.max(0, 0.2 - js) * 2), '#ff8ad0', 'center', 'KFuture'); }
+}
+function drawStyled(p: Play): void {
+  const now = clock();
+  background(performance.now() / 1000, p.song ? p.song.color : '#ff5a6e');
+  if (p.style === 'hammer') drawHammer(p, now); else drawOrbit(p, now);
+  const [sx] = sidePanel(p, now);
+  if (now < 0) text(String(Math.ceil(-now)), sx / 2, 150, 64, '#ffd75a', 'center', 'KFuture');
+  if (p.paused) pauseOverlay();
+}
+
+// ── 망치: 오른쪽에서 벨트를 타고 오는 못을, 모루 위에 왔을 때 내려친다 ──
+function hammerArm(px: number, py: number, len: number, ang: number, big: boolean): void {
+  g.save(); g.translate(px, py); g.rotate(ang);
+  g.fillStyle = '#2a1a14'; g.fillRect(-2, -8, len + 4, 16);
+  g.fillStyle = big ? '#b86542' : '#8a5a3c'; g.fillRect(0, -6, len, 12);
+  g.fillStyle = 'rgba(255,255,255,0.25)'; g.fillRect(0, -6, len, 3);
+  g.fillStyle = '#e5484d'; g.fillRect(len * 0.08, -6, len * 0.22, 12);
+  const hw = big ? 64 : 42, hh = big ? 40 : 24;
+  g.fillStyle = '#2a1a14'; g.fillRect(len - hh / 2 - 2, -hw / 2 - 2, hh + 4, hw + 4);
+  if (big) {
+    g.fillStyle = '#c97a45'; g.fillRect(len - hh / 2, -hw / 2, hh, hw);
+    g.fillStyle = '#e8a46b'; g.fillRect(len - hh / 2, -hw / 2, 6, hw);
+    g.fillStyle = '#ffd75a'; g.fillRect(len - hh / 2, -hw / 2 + 6, hh, 5); g.fillRect(len - hh / 2, hw / 2 - 11, hh, 5);
+  } else {
+    g.fillStyle = '#c0cbdc'; g.fillRect(len - hh / 2, -hw / 2, hh, hw);
+    g.fillStyle = '#eef2fa'; g.fillRect(len - hh / 2, -hw / 2, 5, hw);
+    g.fillStyle = '#8b9bb4'; g.fillRect(len + hh / 2 - 4, -hw / 2, 4, hw);
+  }
+  g.restore();
+}
+function drawHammer(p: Play, now: number): void {
+  const ph = phone(), ms = performance.now();
+  const beltY = ph ? 318 : 380, beltH = 56, hitX = ph ? 170 : 200;
+  const pps = 150 * set.speed;                       // 초당 픽셀
+  const lastBig = p.bursts.findLast((b) => b.lane === 1);
+  const shake = lastBig && ms - lastBig.at < 120 ? Math.sin(ms * 0.9) * 3 : 0;
+  const bx = panelX()[0] - 10;                       // 벨트는 오른쪽 정보 자리 밑에서 나온다
+  g.save(); g.translate(0, shake);
+  g.beginPath(); g.rect(0, 0, bx, H); g.clip();
+  // 작업대 (나무)
+  g.fillStyle = '#5a3a28'; g.fillRect(0, beltY + beltH, VW, H - beltY - beltH);
+  for (let x = 0; x < VW; x += 96) { g.fillStyle = '#4a2e20'; g.fillRect(x, beltY + beltH, 2, H); }
+  g.fillStyle = '#7a4f35'; g.fillRect(0, beltY + beltH, VW, 6);
+  // 벨트 (움직이는 줄무늬) + 바퀴
+  g.fillStyle = '#1c1a26'; g.fillRect(0, beltY, VW, beltH);
+  const off = ((now * pps) % 40 + 40) % 40;
+  g.fillStyle = '#2c2a3a';
+  for (let x = -off; x < VW; x += 40) g.fillRect(x, beltY + 4, 18, beltH - 8);
+  g.fillStyle = '#4a4666'; g.fillRect(0, beltY, VW, 3); g.fillRect(0, beltY + beltH - 3, VW, 3);
+  // 모루(치는 자리)
+  g.fillStyle = 'rgba(255,215,90,0.16)'; g.fillRect(hitX - 30, beltY, 60, beltH);
+  g.strokeStyle = '#ffd75a'; g.lineWidth = 3; g.setLineDash([8, 6]); g.strokeRect(hitX - 30, beltY + 2, 60, beltH - 4); g.setLineDash([]);
+  g.fillStyle = '#3a3f52'; g.beginPath(); g.moveTo(hitX - 46, beltY + beltH); g.lineTo(hitX + 46, beltY + beltH); g.lineTo(hitX + 30, beltY + beltH + 20); g.lineTo(hitX + 22, beltY + beltH + 52); g.lineTo(hitX - 22, beltY + beltH + 52); g.lineTo(hitX - 30, beltY + beltH + 20); g.fill();
+  g.fillStyle = '#5a6078'; g.fillRect(hitX - 46, beltY + beltH, 92, 5);
+  // 못·나사·판자
+  const top = beltY + 8;
+  for (const n of p.notes) {
+    const x = hitX + (n.t - now) * pps;
+    if (x > bx + 60) break;
+    const xe = hitX + (n.t + n.len - now) * pps;
+    if (xe < -60) continue;
+    const hitOk = n.done && n.hitAt !== 0;
+    const missed = n.done && !hitOk;
+    const big = n.lane === 1;
+    const drop = missed ? Math.max(0, now - n.t - 0.1) * 380 : 0;
+    g.globalAlpha = missed ? Math.max(0, 1 - drop / 160) : 1;
+    if (n.len > 0) {
+      // 긴 판자: 누르고 있는 동안 리벳이 차례로 박힌다
+      const x1 = Math.max(x, -40);
+      g.fillStyle = '#2a1a14'; g.fillRect(x1 - 14, top - 14 + drop, xe - x1 + 28, 22);
+      g.fillStyle = big ? '#c97a45' : '#9a6a4a'; g.fillRect(x1 - 12, top - 12 + drop, xe - x1 + 24, 18);
+      for (let rx = x; rx <= xe; rx += 26) {
+        if (rx < -20 || rx > VW + 20) continue;
+        const flat = hitOk && rx <= hitX + 2 && (n.holding || n.tailDone);
+        g.fillStyle = flat ? '#8b9bb4' : big ? '#ffd75a' : '#e0e6f0';
+        g.beginPath(); g.ellipse(rx, top - 12 + drop - (flat ? 0 : 4), 7, flat ? 3 : 6, 0, Math.PI, 0); g.fill();
+      }
+    }
+    if (x < -60) { g.globalAlpha = 1; continue; }
+    // 받침 나무토막
+    const bw = big ? 46 : 34, bh = big ? 26 : 20;
+    g.fillStyle = '#2a1a14'; g.fillRect(x - bw / 2 - 2, top + drop - bh + 14, bw + 4, bh + 4);
+    g.fillStyle = big ? '#b86542' : '#c89a6a'; g.fillRect(x - bw / 2, top + drop - bh + 16, bw, bh);
+    g.fillStyle = big ? '#ff5a6e' : '#4fb0ff'; g.fillRect(x - bw / 2, top + drop + 12, bw, 4);   // 왼손 파랑 · 오른손 빨강
+    text(ph ? (big ? '오' : '왼') : (big ? 'J' : 'F'), x, top + drop - bh / 2 + 18, big ? 13 : 11, 'rgba(42,26,20,0.75)', 'center', 'GalmuriB');
+    // 못(작은)·큰 못
+    const sink = hitOk ? Math.min(1, (now - n.hitAt) * 14) : 0;
+    const nl = (big ? 26 : 20) * (1 - sink * 0.85);
+    const hw = big ? 30 : 18, hh = big ? 8 : 5;
+    const nx = x, ny = top + drop - bh + 16;
+    if (missed) {
+      // 휘어진 못
+      g.strokeStyle = '#8b9bb4'; g.lineWidth = big ? 6 : 4; g.beginPath(); g.moveTo(nx, ny); g.lineTo(nx + 6, ny - nl * 0.6); g.lineTo(nx + 16, ny - nl * 0.8); g.stroke();
+    } else {
+      g.fillStyle = '#2a1a14'; g.fillRect(nx - (big ? 4 : 3), ny - nl - 1, big ? 8 : 6, nl + 1);
+      g.fillStyle = big ? '#e0a830' : '#c0cbdc'; g.fillRect(nx - (big ? 3 : 2), ny - nl, big ? 6 : 4, nl);
+      g.fillStyle = '#2a1a14'; g.fillRect(nx - hw / 2 - 2, ny - nl - hh - 2, hw + 4, hh + 4);
+      g.fillStyle = big ? '#ffd75a' : '#eef2fa'; g.fillRect(nx - hw / 2, ny - nl - hh, hw, hh);
+      g.fillStyle = 'rgba(255,255,255,0.6)'; g.fillRect(nx - hw / 2, ny - nl - hh, hw, 2);
+      if (hitOk && now - n.hitAt < 0.5) { g.globalAlpha = 1 - (now - n.hitAt) * 2; text('★', nx, ny - nl - 26, 16, '#ffe36b', 'center'); }
+    }
+    g.globalAlpha = 1;
+  }
+  // 망치 두 자루: 누르는 순간 내려침 (길게 누르는 중엔 덜덜)
+  const swing = (lane: number) => {
+    const k = (ms - p.pressAt[lane]) / 1000;
+    const holding = p.notes.some((n) => n.lane === lane && n.holding);
+    if (holding) return 0.12 + Math.abs(Math.sin(ms / 40)) * 0.3;
+    if (k < 0.045) return k / 0.045;
+    if (k < 0.24) return 1 - (k - 0.045) / 0.195;
+    return 0;
+  };
+  const small = { px: hitX - 140, py: beltY - 168, len: 160 }, large = { px: hitX + 170, py: beltY - 205, len: 205 };
+  const aimS = Math.atan2(top - 24 - small.py, hitX - small.px), aimL = Math.atan2(top - 32 - large.py, hitX - large.px);
+  const ks = swing(0), kl = swing(1);
+  hammerArm(small.px, small.py, small.len, aimS - (1 - ks) * 1.0, false);
+  hammerArm(large.px, large.py, large.len, aimL + (1 - kl) * 0.9, true);
+  // 손잡이 축
+  for (const a of [small, large]) { g.fillStyle = '#2a1a14'; g.beginPath(); g.arc(a.px, a.py, 9, 0, 7); g.fill(); g.fillStyle = '#8b9bb4'; g.beginPath(); g.arc(a.px, a.py, 6, 0, 7); g.fill(); }
+  // 불꽃
+  for (const b of p.bursts) {
+    const k = (ms - b.at) / 340;
+    if (k >= 1) continue;
+    burst(hitX, top - 6, k, GRADE_COL[b.g], b.lane === 1 ? 90 : 60);
+    if (k < 0.5) text(b.lane === 1 ? '쾅!' : '탕!', hitX + (b.lane === 1 ? 40 : -40), top - 70 - k * 30, b.lane === 1 ? 26 : 20, '#ffffff', 'center', 'GalmuriB');
+  }
+  p.bursts = p.bursts.filter((b) => ms - b.at < 400);
+  // 벨트 끝 바퀴
+  g.fillStyle = '#0a0818'; g.beginPath(); g.arc(bx - 4, beltY + beltH / 2, beltH / 2 + 4, 0, 7); g.fill();
+  g.fillStyle = '#4a4666'; g.beginPath(); g.arc(bx - 4, beltY + beltH / 2, beltH / 2 - 2, 0, 7); g.fill();
+  g.save(); g.translate(bx - 4, beltY + beltH / 2); g.rotate(-now * pps / (beltH / 2)); g.fillStyle = '#8b9bb4'; g.fillRect(-3, -beltH / 2 + 4, 6, beltH - 8); g.fillRect(-beltH / 2 + 4, -3, beltH - 8, 6); g.restore();
+  g.restore();
+  gradePop(p, Math.min(hitX + (ph ? 330 : 300), bx - 120), ph ? 130 : 150);
+  if (set.meter && !ph) errorMeter(p, hitX + 60, 300, beltY + beltH + 18);
+  // 아래: 키 안내 (휴대폰은 왼쪽·오른쪽 반을 누르는 큰 패드)
+  if (ph) {
+    const py = beltY + beltH + 24, phh = H - py - 10, half = (VW - 36) / 2;
+    [['작은 망치', '#4fb0ff'], ['큰 망치', '#ff5a6e']].forEach(([label, col], i) => {
+      const x = 12 + i * (half + 12);
+      g.fillStyle = p.held[i] ? col + 'aa' : 'rgba(255,255,255,0.08)'; g.beginPath(); g.roundRect(x, py, half, phh, 18); g.fill();
+      g.strokeStyle = col; g.lineWidth = 3; g.beginPath(); g.roundRect(x, py, half, phh, 18); g.stroke();
+      text(label, x + half / 2, py + phh / 2, 22, '#fff', 'center', 'GalmuriB');
+    });
+  } else {
+    text('F (A S D) 작은 망치 — 파란 못', 30, H - 40, 14, p.held[0] ? '#4fb0ff' : '#cfd3ea');
+    text('J (K L ;) 큰 망치 — 빨간 못 · 판자는 꾹', 30, H - 18, 14, p.held[1] ? '#ff8a8a' : '#cfd3ea');
+  }
+}
+
+// ── 궤도: 해와 달이 번갈아 축이 되어 돈다. 도는 별이 다음 칸에 닿을 때 누른다 ──
+function drawOrbit(p: Play, now: number): void {
+  const tiles = p.tiles, ms = performance.now(), ph = phone();
+  if (!tiles.length) return;
+  const at = orbitAt(tiles, now, p.bpm);
+  const areaW = panelX()[0] - 16;
+  const Rr = ph ? 66 : 74;
+  // 카메라: 축 칸과 도는 별 사이를 부드럽게 따라감
+  const tx = (tiles[at.i].x * 0.7 + at.x * 0.3), ty = (tiles[at.i].y * 0.7 + at.y * 0.3);
+  const dt = p.cam.at ? Math.min(0.1, (ms - p.cam.at) / 1000) : 1;
+  p.cam.at = ms;
+  if (dt >= 1 || Math.hypot(p.cam.x - tx, p.cam.y - ty) > 6) { p.cam.x = tx; p.cam.y = ty; }
+  else { const k = 1 - Math.exp(-dt * 5); p.cam.x += (tx - p.cam.x) * k; p.cam.y += (ty - p.cam.y) * k; }
+  const cx = areaW / 2, cy = H / 2 + 10;
+  const X = (x: number) => cx + (x - p.cam.x) * Rr, Y = (y: number) => cy + (y - p.cam.y) * Rr;
+  g.save(); g.beginPath(); g.rect(0, 0, areaW, H); g.clip();
+  // 박자에 맞춰 숨 쉬는 원
+  const beat = now > 0 ? (now / (60 / p.bpm)) % 1 : 0;
+  g.strokeStyle = `rgba(255,255,255,${0.06 + (1 - beat) * 0.06})`; g.lineWidth = 2;
+  for (let r = 1; r <= 4; r++) { g.beginPath(); g.arc(cx, cy, Rr * r * 1.6 + beat * 10, 0, 7); g.stroke(); }
+  // 길
+  const from = Math.max(0, at.i - 6), to = Math.min(tiles.length - 1, at.i + 28);
+  g.lineCap = 'round'; g.lineJoin = 'round';
+  g.strokeStyle = 'rgba(10,8,24,0.8)'; g.lineWidth = 30; g.beginPath();
+  for (let i = from; i <= to; i++) { const t = tiles[i]; if (i === from) g.moveTo(X(t.x), Y(t.y)); else g.lineTo(X(t.x), Y(t.y)); }
+  g.stroke();
+  g.strokeStyle = 'rgba(207,211,234,0.35)'; g.lineWidth = 18; g.stroke();
+  // 칸
+  for (let i = to; i >= from; i--) {
+    const t = tiles[i], x = X(t.x), y = Y(t.y);
+    const ahead = i - at.i;
+    const fade = ahead > 18 ? Math.max(0, 1 - (ahead - 18) / 10) : 1;
+    g.globalAlpha = fade;
+    if (t.auto) { g.fillStyle = 'rgba(207,211,234,0.55)'; g.beginPath(); g.arc(x, y, 6, 0, 7); g.fill(); g.globalAlpha = 1; continue; }
+    const n = p.notes[t.note];
+    const hitOk = n && n.done && n.hitAt !== 0, missed = n && n.done && !hitOk;
+    const next = !n.done && p.notes.findIndex((m) => !m.done) === t.note;
+    const dir = i > 0 ? Math.atan2(t.y - tiles[i - 1].y, t.x - tiles[i - 1].x) : 0;
+    const size = next ? 26 + (1 - beat) * 3 : 22;
+    g.save(); g.translate(x, y); g.rotate(dir);
+    g.fillStyle = '#0a0818'; g.beginPath(); g.roundRect(-size / 2 - 3, -size / 2 - 3, size + 6, size + 6, 8); g.fill();
+    g.fillStyle = missed ? '#ff5a6e' : hitOk ? '#9cf59c' : next ? '#ffd75a' : i % 2 ? '#bfe0ff' : '#ffe2b0';
+    g.beginPath(); g.roundRect(-size / 2, -size / 2, size, size, 6); g.fill();
+    g.fillStyle = 'rgba(255,255,255,0.5)'; g.fillRect(-size / 2 + 3, -size / 2 + 3, size - 6, 3);
+    g.restore();
+    if (t.turn) text('↺', x, y + 1, 18, '#2a2440', 'center', 'GalmuriB');
+    g.globalAlpha = 1;
+  }
+  // 해와 달: 축 별과 도는 별 (칸마다 바뀜)
+  const piv = tiles[at.i];
+  const pivSun = at.i % 2 === 0;
+  const px = X(piv.x), py = Y(piv.y), mx = X(at.x), my = Y(at.y);
+  g.strokeStyle = 'rgba(255,255,255,0.16)'; g.lineWidth = 2; g.beginPath(); g.arc(px, py, Rr, 0, 7); g.stroke();
+  // 도는 별의 꼬리
+  const spb = 60 / p.bpm, w = Math.PI / spb;
+  for (let k = 1; k <= 8; k++) {
+    const a = at.ang - piv.spin * w * (k * 0.025);
+    g.fillStyle = pivSun ? `rgba(150,200,255,${0.4 - k * 0.045})` : `rgba(255,190,90,${0.4 - k * 0.045})`;
+    g.beginPath(); g.arc(px + Math.cos(a) * Rr, py + Math.sin(a) * Rr, 13 - k, 0, 7); g.fill();
+  }
+  const star = (x: number, y: number, sun: boolean, r: number) => {
+    const glow = g.createRadialGradient(x, y, 2, x, y, r * 2.2);
+    glow.addColorStop(0, sun ? 'rgba(255,200,80,0.7)' : 'rgba(150,200,255,0.6)'); glow.addColorStop(1, 'rgba(0,0,0,0)');
+    g.fillStyle = glow; g.beginPath(); g.arc(x, y, r * 2.2, 0, 7); g.fill();
+    if (sun) {
+      g.fillStyle = '#ffb02e';
+      for (let k = 0; k < 8; k++) { const a = k * Math.PI / 4 + ms / 900; g.beginPath(); g.moveTo(x + Math.cos(a) * r * 1.5, y + Math.sin(a) * r * 1.5); g.lineTo(x + Math.cos(a + 0.25) * r * 0.9, y + Math.sin(a + 0.25) * r * 0.9); g.lineTo(x + Math.cos(a - 0.25) * r * 0.9, y + Math.sin(a - 0.25) * r * 0.9); g.fill(); }
+      g.fillStyle = '#ffd75a'; g.beginPath(); g.arc(x, y, r, 0, 7); g.fill();
+      g.fillStyle = '#fff3b0'; g.beginPath(); g.arc(x - r * 0.3, y - r * 0.3, r * 0.4, 0, 7); g.fill();
+    } else {
+      g.fillStyle = '#dfe9ff'; g.beginPath(); g.arc(x, y, r, 0, 7); g.fill();
+      g.fillStyle = '#b6c6ea'; g.beginPath(); g.arc(x + r * 0.3, y - r * 0.2, r * 0.25, 0, 7); g.arc(x - r * 0.35, y + r * 0.3, r * 0.18, 0, 7); g.fill();
+    }
+  };
+  star(px, py, pivSun, 15);
+  star(mx, my, !pivSun, 13);
+  for (const b of p.bursts) { const k = (ms - b.at) / 320; if (k < 1) burst(px, py, k, GRADE_COL[b.g], 70); }
+  p.bursts = p.bursts.filter((b) => ms - b.at < 400);
+  g.restore();
+  gradePop(p, areaW / 2, 92, 26);
+  if (set.meter) errorMeter(p, areaW / 2 - 150, 300, H - 54);
+  text(ph ? '화면 아무 데나 톡 — 도는 별이 다음 칸에 닿을 때' : '아무 키나 (Space·F·J…) — 도는 별이 다음 칸에 닿을 때 · ↺ 칸부터 반대로 돌아요', areaW / 2, H - 24, 13, '#cfd3ea', 'center');
+}
+
 function drawPlay(): void {
   const p = play!;
+  if (p.style !== 'keys') { drawStyled(p); return; }
   const now = clock();
   if (p.song) {
     const spb = 60 / p.song.bpm;
@@ -693,13 +991,14 @@ function drawPlay(): void {
     }
   }
   if (now < 0) text(String(Math.ceil(-now)), x0 + G.fw / 2, 150, 64, '#ffd75a', 'center', 'KFuture');
-  if (p.paused) {
-    g.fillStyle = 'rgba(0,0,0,0.65)'; g.fillRect(0, 0, VW, H);
-    text('잠깐 멈춤', VW / 2, 140, 32, '#fff', 'center', 'GalmuriB');
-    const items: Array<[string, () => void, string]> = [['계속하기 (Enter)', resumeGame, 'blue'], ['그만두기 (Esc)', quitGame, 'red']];
-    if (fsOffer()) items.push([isFs() ? '전체 화면 끄기' : '전체 화면', toggleFs, 'grey']);
-    items.forEach(([label, act, col], i) => { const y = 190 + i * 76; button(label, VW / 2 - 150, y, 300, 60, false, col); hitAct(VW / 2 - 150, y, 300, 60, act); });
-  }
+  if (p.paused) pauseOverlay();
+}
+function pauseOverlay(): void {
+  g.fillStyle = 'rgba(0,0,0,0.65)'; g.fillRect(0, 0, VW, H);
+  text('잠깐 멈춤', VW / 2, 140, 32, '#fff', 'center', 'GalmuriB');
+  const items: Array<[string, () => void, string]> = [['계속하기 (Enter)', resumeGame, 'blue'], ['그만두기 (Esc)', quitGame, 'red']];
+  if (fsOffer()) items.push([isFs() ? '전체 화면 끄기' : '전체 화면', toggleFs, 'grey']);
+  items.forEach(([label, act, col], i) => { const y = 190 + i * 76; button(label, VW / 2 - 150, y, 300, 60, false, col); hitAct(VW / 2 - 150, y, 300, 60, act); });
 }
 
 function titleItems(): string[] {
@@ -726,18 +1025,19 @@ function drawTitle(): void {
   text('YOUTUJAM', W / 2, 205, 22, '#cfd3ea', 'center', 'KFuture');
   const items = titleItems();
   items.forEach((s, i) => { button(s, W / 2 - 120, 260 + i * 66, 240, 54, cursor === i); hitRow(i, W / 2 - 120, 260 + i * 66, 240, 54); });
-  text('↑↓ 고르기 · Enter 결정 · 4건반 D F J K · 5건반 D F ␣ J K · 6건반 S D F J K L · 7건반 S D F ␣ J K L', W / 2, 500, 12, '#a9a4c8', 'center');
+  text('↑↓ 고르기 · Enter 결정 · 4건반 D F J K · 5건반 D F ␣ J K · 6건반 S D F J K L · 7건반 S D F ␣ J K L', W / 2, 492, 12, '#a9a4c8', 'center');
+  text('새 방식: 망치(F·J로 못 박기) · 궤도(해와 달을 따라 아무 키) — 곡 고르기에서 Tab', W / 2, 514, 12, '#ffd75a', 'center');
 }
 
 let selTop = 0;
 const SEL_SHOW = 5;
 const lvCache = new Map<string, Record<Level, number>>();
 function levelsOf(song: Song): Record<Level, number> {
-  const k = `${song.id}_${set.lanes}`;
+  const k = `${song.id}_${set.style}_${set.lanes}`;
   let v = lvCache.get(k);
   if (!v) {
     const sec = (song.beats * 60) / song.bpm;
-    v = { easy: levelNumber(fromSong(song, set.lanes, 'easy'), sec), normal: levelNumber(fromSong(song, set.lanes, 'normal'), sec), hard: levelNumber(fromSong(song, set.lanes, 'hard'), sec) };
+    v = { easy: levelNumber(songChart(song, 'easy'), sec), normal: levelNumber(songChart(song, 'normal'), sec), hard: levelNumber(songChart(song, 'hard'), sec) };
     lvCache.set(k, v);
   }
   return v;
@@ -759,9 +1059,9 @@ function preview(): void {
 function drawSelect(): void {
   background(performance.now() / 1000, entries()[cursor]?.color);
   text('곡 고르기', 30, 34, 22, '#fff', 'left', 'GalmuriB');
-  button(`${set.lanes}건반 ▶`, 170, 12, 120, 40, false, 'blue');
+  button(`${kindLabel()} ▶`, 170, 12, 120, 40, false, set.style === 'keys' ? 'blue' : set.style === 'hammer' ? 'red' : 'yellow');
   hitAct(170, 12, 120, 40, () => key('Tab', true, false));
-  text('←→ 난이도 · Tab 건반 수', 304, 33, 12, '#a9a4c8');
+  text(fit2(`←→ 난이도 · Tab 방식·건반 수 — ${STYLE_DESC[set.style]}`, 560, 12), 304, 33, 12, set.style === 'keys' ? '#a9a4c8' : '#ffd75a');
   backButton();
   const list = entries();
   // 다섯 줄씩 보이고, 고른 줄을 따라 내려간다
@@ -790,7 +1090,7 @@ function drawSelect(): void {
     text(e.title, 104, y + 28, 22, on ? '#3b2a00' : '#2a2440', 'left', 'GalmuriB');
     text(e.sub, 104, y + 56, 13, on ? '#5a4410' : '#4a4466');
     if (e.song) {
-      const b = best[`${e.song.id}_${set.lanes}_${set.level}`];
+      const b = best[`${e.song.id}_${playLanes()}_${set.level}`];
       if (b) text(`최고 ${b.score} · ${b.rank}`, 880, y + 26, 15, on ? '#3b2a00' : '#2a2440', 'right', 'KFuture');
       const lvs = levelsOf(e.song);
       (['easy', 'normal', 'hard'] as Level[]).forEach((l, k) => {
@@ -809,11 +1109,11 @@ function drawSelect(): void {
   text('Enter 시작 · Esc 뒤로 · 고른 곡의 후렴을 미리 들려줍니다', W / 2, 520, 12, '#a9a4c8', 'center');
 }
 
-const SET_ROWS = ['건반 수', '난이도', '노트 속도', '판정 맞추기 (ms)', '자동으로 맞추기 (박자에 맞춰 Space)', '타격음', '타격음 크기', '판정 오차 막대 (FAST·SLOW)', '체력 0이 돼도 계속', '휴대폰 모드 (큰 건반·진동)', '진동 (휴대폰 모드)', '돌아가기'];
+const SET_ROWS = ['방식 · 건반 수', '난이도', '노트 속도', '판정 맞추기 (ms)', '자동으로 맞추기 (박자에 맞춰 Space)', '타격음', '타격음 크기', '판정 오차 막대 (FAST·SLOW)', '체력 0이 돼도 계속', '휴대폰 모드 (큰 건반·진동)', '진동 (휴대폰 모드)', '돌아가기'];
 function drawSettings(): void {
   background(performance.now() / 1000);
   text('설정', 30, 34, 22, '#fff', 'left', 'GalmuriB');
-  const vals = [`${set.lanes}건반`, { easy: '쉬움', normal: '보통', hard: '어려움' }[set.level], `×${set.speed.toFixed(1)}`, `${set.offset > 0 ? '+' : ''}${set.offset}`, '', HIT_KO[set.hitSound], `${Math.round(set.hitVol * 100)}%`, set.meter ? '켬' : '끔', set.noFail ? '켬' : '끔', MOBILE_KO[set.mobile], set.vibrate ? '켬' : '끔', ''];
+  const vals = [kindLabel(), { easy: '쉬움', normal: '보통', hard: '어려움' }[set.level], `×${set.speed.toFixed(1)}`, `${set.offset > 0 ? '+' : ''}${set.offset}`, '', HIT_KO[set.hitSound], `${Math.round(set.hitVol * 100)}%`, set.meter ? '켬' : '끔', set.noFail ? '켬' : '끔', MOBILE_KO[set.mobile], set.vibrate ? '켬' : '끔', ''];
   SET_ROWS.forEach((r, i) => {
     // 두 줄로 크게 (손가락으로도 누르기 쉽게)
     const col = i < 6 ? 0 : 1, x = 30 + col * 456, y = 66 + (i % 6) * 68, w = 444, h = 58;
@@ -898,6 +1198,18 @@ function saveLib(): void {
   if (!persistAsked) { persistAsked = true; navigator.storage?.persist?.().catch(() => {}); }
 }
 function current(): Lib.Video | undefined { return ytId ? Lib.find(lib, ytId) : undefined; }
+/** 고를 수 있는 내 채보: 건반은 그 건반 수(+리듬 채보), 망치·궤도는 아무 채보나 바꿔서 */
+function myCharts(v: Lib.Video | undefined): Lib.SavedChart[] {
+  if (set.style === 'keys') return Lib.chartsFor(v, set.lanes);
+  return v ? [...v.charts].sort((a, b) => b.at - a.at) : [];
+}
+/** 저장한 채보를 지금 방식의 노트로 */
+function notesFrom(c: Lib.SavedChart): Note[] {
+  const lanes = playLanes();
+  if (set.style === 'orbit') return toOrbit(c.notes, ytBpm, set.level);
+  if (c.lanes === Lib.RHYTHM) return arrangeTaps(c.notes, lanes, set.level, c.id);
+  return squeeze(c.notes, c.lanes, lanes);
+}
 
 let ytMsg = '';
 let ytId = '';
@@ -907,7 +1219,7 @@ let chartPick = 0;
 let libTop = 0;                 // 목록에서 맨 위에 보이는 칸
 let armed = '', armedAt = 0;    // 지우기는 두 번 눌러야
 const LIB_SHOW = 3;
-const YT_ROWS = ['영상 불러오기', '리듬 채보 만들기 (키 하나로 박자만 치기)', '채보 만들기 (건반까지 직접 정해서 치기)', '내 채보로 하기', '건반 수', '자동 채보 (BPM으로 대충)', 'BPM (재생 중 T 두드리기)', '첫 박 (재생 중 첫 박에 B)', '돌아가기'];
+const YT_ROWS = ['영상 불러오기', '리듬 채보 만들기 (키 하나로 박자만 치기)', '채보 만들기 (건반까지 직접 정해서 치기)', '내 채보로 하기', '방식 · 건반 수', '자동 채보 (BPM으로 대충)', 'BPM (재생 중 T 두드리기)', '첫 박 (재생 중 첫 박에 B)', '돌아가기'];
 // 메뉴 번호
 const R = { load: 0, tap: 1, rec: 2, mine: 3, lanes: 4, auto: 5, bpm: 6, beat: 7, back: 8 };
 // 커서 번호: 0~7 메뉴, 8~ 목록의 영상들, 그 뒤 두 칸은 백업 내보내기·가져오기
@@ -943,11 +1255,11 @@ function mmss(sec: number): string { const m = Math.floor(sec / 60), s = Math.fl
 function drawYt(): void {
   background(performance.now() / 1000, '#ff5a6e');
   text('유튜브 음악으로 하기', 24, 30, 20, '#fff', 'left', 'GalmuriB');
-  text(`${set.lanes}건반 · ${LEVEL_KO[set.level]}`, 450, 30, 13, '#ffd75a', 'right');
+  text(`${kindLabel()} · ${LEVEL_KO[set.level]}`, 450, 30, 13, '#ffd75a', 'right');
   const v = current();
   // 제목은 재생해야 알 수 있을 때가 있어서, 알게 되면 목록에도 적어 둔다
   if (v && yt.ready && yt.title() && v.title !== yt.title()) { v.title = yt.title(); if (yt.duration()) v.duration = yt.duration(); saveLib(); }
-  const charts = Lib.chartsFor(v, set.lanes);
+  const charts = myCharts(v);
   if (chartPick >= charts.length) chartPick = Math.max(0, charts.length - 1);
   YT_ROWS.forEach((r, i) => {
     const y = 100 + i * 41;
@@ -961,7 +1273,7 @@ function drawYt(): void {
     const dark = on ? '#3b2a00' : '#2a2440';
     let val = '';
     if (i === R.mine) val = charts.length ? `◀ ${charts[chartPick].name} · ${charts[chartPick].notes.length} ▶` : '없음';
-    if (i === R.lanes) val = `◀ ${set.lanes}건반 ▶`;
+    if (i === R.lanes) val = `◀ ${kindLabel()} ▶`;
     if (i === R.bpm) val = `◀ ${ytBpm} ▶`;
     if (i === R.beat) val = `◀ ${ytOffset.toFixed(2)}초 ▶`;
     if (i === R.tap) val = '추천';
@@ -1031,6 +1343,7 @@ function drawResult(): void {
   background(performance.now() / 1000, p.song?.color);
   const r = rank(p.tally);
   text(p.title, W / 2, 50, 22, '#fff', 'center', 'GalmuriB');
+  text(`${p.style === 'keys' ? `${p.chart.lanes}건반` : STYLE_KO[p.style]} · ${LEVEL_KO[p.chart.level]}`, W / 2, 78, 13, '#ffd75a', 'center');
   text(r, 260, 250, 140, r === 'F' ? '#ff6b7b' : r.startsWith('S') ? '#ffe36b' : '#6bd0ff', 'center', 'KFuture');
   if (p.tally.failed) text('체력이 다 떨어졌어요', 260, 360, 18, '#ff9aa6', 'center');
   if (resultNew) text('새 최고 기록!', 260, 360, 20, '#ffe36b', 'center');
@@ -1054,6 +1367,8 @@ function drawResult(): void {
 
 // ── 입력 ──
 function laneOf(code: string): number {
+  if (play && play.style === 'hammer') return hammerLane(code);
+  if (play && play.style === 'orbit') return orbitKey(code) ? 0 : -1;
   const keys = KEYMAPS[play ? play.chart.lanes : set.lanes];
   return keys.indexOf(code);
 }
@@ -1095,18 +1410,22 @@ function ytStart(mode: 'auto' | 'record' | 'tap' | 'mine', chartId?: string): vo
   let chart: Chart;
   let cid: string | undefined;
   if (mode === 'mine') {
-    const charts = Lib.chartsFor(current(), set.lanes);
+    const charts = myCharts(current());
     const c = (chartId && charts.find((x) => x.id === chartId)) || charts[chartPick];
-    if (!c) { ytMsg = `${set.lanes}건반 채보가 없어요. "채보 만들기"로 먼저 만들어 주세요.`; return; }
-    const notes = c.lanes === Lib.RHYTHM ? arrangeTaps(c.notes, set.lanes, set.level, c.id) : c.notes;
-    chart = { notes, lanes: set.lanes, level: set.level };
+    if (!c) { ytMsg = `${kindLabel()}으로 할 채보가 없어요. "채보 만들기"로 먼저 만들어 주세요.`; return; }
+    chart = { notes: notesFrom(c), lanes: playLanes(), level: set.level };
     cid = c.id; lastChartId = c.id;
   } else if (mode === 'record' || mode === 'tap') chart = { notes: [], lanes: set.lanes, level: set.level };
-  else chart = fromBeat(ytBpm, ytOffset, dur, set.lanes, set.level, ytId);
+  else {
+    chart = fromBeat(ytBpm, ytOffset, dur, playLanes(), set.level, ytId);
+    if (set.style === 'orbit') chart = { ...chart, notes: toOrbit(chart.notes, ytBpm, set.level) };
+  }
   if (mode === 'auto' || mode === 'mine') lastYtMode = mode;
   play = newPlay(chart, mode === 'record' || mode === 'tap' ? 'record' : 'yt', yt.title() || '유튜브 영상', dur);
   play.tap = mode === 'tap';
   play.ytId = ytId;
+  // 녹음은 늘 건반 판에서
+  setStyle(play, mode === 'record' || mode === 'tap' ? 'keys' : set.style, ytBpm);
   play.chartId = cid;
   play.end = dur + 1;
   form.style.display = 'none';
@@ -1216,7 +1535,7 @@ function key(code: string, down: boolean, repeat: boolean, at = performance.now(
       if (up) { cursor = (cursor - 1 + n) % n; moveSfx(); }
       if (dn) { cursor = (cursor + 1) % n; moveSfx(); }
       if (lf || rt) { set.level = cycle<Level>(['easy', 'normal', 'hard'], set.level, rt ? 1 : -1); saveJson('yj_settings', set); moveSfx(); }
-      if (code === 'Tab') { set.lanes = cycle([4, 5, 6, 7], set.lanes, 1); saveJson('yj_settings', set); moveSfx(); }
+      if (code === 'Tab') { cycleKind(1); moveSfx(); }
       if (back) { screen = 'title'; cursor = 0; }
       if (ok) {
         const e = entries()[cursor];
@@ -1231,7 +1550,7 @@ function key(code: string, down: boolean, repeat: boolean, at = performance.now(
       if (dn) { cursor = (cursor + 1) % SET_ROWS.length; moveSfx(); }
       const d = rt ? 1 : lf ? -1 : 0;
       if (d) {
-        if (cursor === 0) set.lanes = cycle([4, 5, 6, 7], set.lanes, d);
+        if (cursor === 0) cycleKind(d);
         if (cursor === 1) set.level = cycle<Level>(['easy', 'normal', 'hard'], set.level, d);
         if (cursor === 2) set.speed = Math.max(1, Math.min(6, Math.round((set.speed + d * 0.5) * 10) / 10));
         if (cursor === 3) set.offset = Math.max(-300, Math.min(300, set.offset + d * 10));
@@ -1266,11 +1585,11 @@ function key(code: string, down: boolean, repeat: boolean, at = performance.now(
         const b = tapBpm(taps); if (b) { ytBpm = b; ytMsg = `두드린 박자: BPM ${b}`; saveBeat(); }
       }
       if (code === 'KeyB' && yt.isPlaying()) { ytOffset = Math.round(yt.time() * 100) / 100; ytMsg = `첫 박 위치: ${ytOffset}초`; saveBeat(); }
-      if (code === 'Tab') { set.lanes = cycle([4, 5, 6, 7], set.lanes, 1); chartPick = 0; saveJson('yj_settings', set); moveSfx(); }
+      if (code === 'Tab') { cycleKind(1); chartPick = 0; moveSfx(); }
       const d = rt ? 1 : lf ? -1 : 0;
-      const charts = Lib.chartsFor(current(), set.lanes);
+      const charts = myCharts(current());
       if (d && cursor === R.mine && charts.length) { chartPick = (chartPick + d + charts.length) % charts.length; moveSfx(); }
-      if (d && cursor === R.lanes) { set.lanes = cycle([4, 5, 6, 7], set.lanes, d); chartPick = 0; saveJson('yj_settings', set); moveSfx(); }
+      if (d && cursor === R.lanes) { cycleKind(d); chartPick = 0; moveSfx(); }
       if (d && cursor === R.bpm) { ytBpm = Math.max(40, Math.min(260, Math.round((ytBpm + d) * 10) / 10)); saveBeat(); }
       if (d && cursor === R.beat) { ytOffset = Math.max(0, Math.round((ytOffset + d * 0.02) * 100) / 100); saveBeat(); }
       const list = Lib.sorted(lib);
@@ -1344,7 +1663,7 @@ cv.addEventListener('pointerdown', (e) => {
     if (h && h.act) { downHit = { id: e.pointerId, x, y }; return; }
     if (play.tap) { tapDownAt(play, 'p' + e.pointerId, e.timeStamp); buzz(10); return; }
     const [x0, lw] = lanesX(play);
-    const lane = Math.floor((x - x0) / lw);
+    const lane = play.style === 'hammer' ? (x < VW / 2 - OX ? 0 : 1) : play.style === 'orbit' ? 0 : Math.floor((x - x0) / lw);
     if (lane >= 0 && lane < play.chart.lanes) { touchLane.set(e.pointerId, lane); press(lane, e.timeStamp); buzz(12); }
     return;
   }

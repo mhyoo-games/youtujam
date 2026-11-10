@@ -12,6 +12,7 @@ GitHub Pages(`https://minhyuk94.github.io/youtujam/`)에 올린다.
 - 2000년대 국산 온라인 리듬 게임에서 영감을 받았지만 **새로 만든 게임**이다. 다른 게임의 이름·그림·곡·판정 이름을 쓰지 않고, 다른 회사·게임 이름을 README·화면·이력서에 넣지 않는다.
 - 그림: Kenney UI Pack(CC0, `public/assets/KENNEY_LICENSE.txt`) + 코드로 그린 것. 글꼴: 갈무리(OFL), Kenney Future Narrow(CC0).
 - 자체곡은 `src/core/music.ts`(작곡 도구)·`songs.ts`(곡)로 코드에서 만든다. 음원 파일을 넣지 않는다. 노트는 곡 소리에서 만들고(키음), 친 순간 그 소리가 난다.
+- 게임 방식 세 가지: 건반·망치·궤도 (`src/core/styles.ts`). 채보·판정은 공통이고 방식마다 칸 수(망치 2, 궤도 1)·입력·그림만 다르다. 궤도 길(`orbitPath`)은 한 박에 반 바퀴, 1.5박 넘게 비면 저절로 지나가는 칸을 넣는다. 녹음은 늘 건반 판.
 - 규칙(채보·판정·점수·잼 게이지·키 배치)은 `src/core/`에 화면과 분리한 순수 TS (import에 `.ts` → `node --test`로 바로 테스트). 새 규칙에는 `tests/core.test.ts`에 테스트를 더한다.
 - 유튜브는 IFrame Player API(키 필요 없음). 소리를 분석할 수 없으므로 채보는 BPM·첫 박으로 만들거나 직접 쳐서 녹음한다. 영상은 화면에 보이게 둔다(약관).
 - 내 영상 목록(`src/core/library.ts`): 불러온 영상·BPM·직접 친 채보(여러 개, 덮어쓰지 않음)를 localStorage `yj_library` 하나에 저장. 모양을 바꾸면 `parse`가 예전 값을 읽을 수 있게 하고 테스트를 더한다. 백업 파일 내보내기·가져오기(`merge`). 리듬 채보(`lanes: 1`)는 박자만 저장하고, 할 때 `arrangeTaps`(chart.ts)로 건반 수·난이도에 맞춰 칸을 정한다.

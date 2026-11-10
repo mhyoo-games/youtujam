@@ -293,3 +293,63 @@ test('옮기기(전조)와 3박자 마디', () => {
   assert.ok(bolero.bars!.every((b, i, a) => i === 0 || b - a[i - 1] === 3), '볼레로는 마디가 3박');
   assert.equal(bolero.beats, bolero.bars!.length * 3);
 });
+
+// ── 게임 방식: 망치·궤도 ──
+import { lanesFor, hammerLane, squeeze, toOrbit, orbitPath, orbitAt, orbitKey, ORBIT_MAX_GAP } from '../src/core/styles.ts';
+
+test('방식별 칸 수와 키: 망치는 왼손 0·오른손 1, 궤도는 메뉴 키 빼고 아무 키', () => {
+  assert.equal(lanesFor('keys', 6), 6); assert.equal(lanesFor('hammer', 6), 2); assert.equal(lanesFor('orbit', 6), 1);
+  assert.equal(hammerLane('KeyF'), 0); assert.equal(hammerLane('KeyD'), 0); assert.equal(hammerLane('KeyJ'), 1); assert.equal(hammerLane('KeyQ'), -1);
+  assert.ok(orbitKey('KeyZ') && orbitKey('Space') && !orbitKey('Escape') && !orbitKey('Enter'));
+});
+
+test('망치: 자체곡·유튜브 채보를 2줄로 만들 수 있고, 4건반 채보는 왼쪽 반·오른쪽 반으로 나뉜다', () => {
+  for (const s of SONGS) {
+    const c = fromSong(s, 2, 'normal');
+    assert.ok(c.notes.length > 20, s.id);
+    assert.ok(c.notes.every((n) => n.lane === 0 || n.lane === 1));
+    assert.ok(c.notes.some((n) => n.lane === 0) && c.notes.some((n) => n.lane === 1), `${s.id}: 두 망치 다 씀`);
+  }
+  const b = fromBeat(120, 0.5, 60, 2, 'hard', 'x');
+  assert.ok(b.notes.every((n) => n.lane < 2) && b.notes.length > 10);
+  const sq = squeeze([{ t: 1, lane: 0, len: 0 }, { t: 1.5, lane: 1, len: 0 }, { t: 2, lane: 2, len: 0 }, { t: 2.5, lane: 3, len: 0 }], 4, 2);
+  assert.deepEqual(sq.map((n) => n.lane), [0, 0, 1, 1]);
+});
+
+test('궤도: 한 줄로 합치고, 너무 가까운 노트·길게 누르기는 없앤다', () => {
+  const notes = [{ t: 1, lane: 2, len: 0.5 }, { t: 1.05, lane: 0, len: 0 }, { t: 1.5, lane: 1, len: 0 }, { t: 1.6, lane: 3, len: 0 }];
+  const o = toOrbit(notes, 120, 'normal');           // ¼박 = 0.125초
+  assert.deepEqual(o.map((n) => n.t), [1, 1.5]);
+  assert.ok(o.every((n) => n.lane === 0 && n.len === 0));
+  assert.deepEqual(toOrbit(notes, 120, 'easy').map((n) => n.t), [1, 1.5]);
+});
+
+test('궤도 길: 칸 사이는 늘 1, 노트 시각에 도는 별이 딱 그 칸에 닿고, 한 박이면 곧게 간다', () => {
+  const bpm = 120, spb = 0.5;
+  const notes = [0, 1, 2, 2.5, 3.25, 6, 6.5].map((b) => ({ t: 2 + b * spb, lane: 0, len: 0 }));
+  const tiles = orbitPath(notes, bpm);
+  for (let i = 1; i < tiles.length; i++) assert.ok(Math.abs(Math.hypot(tiles[i].x - tiles[i - 1].x, tiles[i].y - tiles[i - 1].y) - 1) < 1e-9);
+  // 모든 노트가 칸이 됨 + 길게 빈 곳(3.25→6박)엔 저절로 지나는 칸
+  assert.equal(tiles.filter((t) => !t.auto).length, notes.length);
+  assert.ok(tiles.some((t) => t.auto && t.note < 0 && t.t > 2 + 3.25 * spb));
+  for (let i = 1; i < tiles.length; i++) assert.ok(tiles[i].t - tiles[i - 1].t <= ORBIT_MAX_GAP * spb + 1e-9);
+  // 노트 시각의 별 위치 = 그 칸
+  for (const tl of tiles.slice(1)) {
+    const at = orbitAt(tiles, tl.t - 1e-7, bpm);
+    assert.ok(Math.hypot(at.x - tl.x, at.y - tl.y) < 1e-4, `칸 ${tl.t}`);
+  }
+  // 첫 두 노트는 한 박 차이 → 앞 칸, 이 칸, 다음 칸이 일직선
+  const [a, b, c] = [tiles[0], tiles[1], tiles[2]];
+  const cross = (b.x - a.x) * (c.y - b.y) - (b.y - a.y) * (c.x - b.x);
+  assert.ok(Math.abs(cross) < 1e-9, '한 박 = 곧게');
+});
+
+test('궤도 길: 자체곡 전부 만들 수 있고 방향 바꾸기는 16칸마다', () => {
+  for (const s of SONGS) {
+    const notes = toOrbit(fromSong(s, 1, 'hard').notes, s.bpm, 'hard');
+    const tiles = orbitPath(notes, s.bpm, { turns: true });
+    assert.equal(tiles.filter((t) => !t.auto).length, notes.length, s.id);
+    const turns = tiles.filter((t) => t.turn).length;
+    assert.equal(turns, Math.floor(notes.length / 16), s.id);
+  }
+});
