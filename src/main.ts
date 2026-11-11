@@ -1,4 +1,4 @@
-// 유튜잼: 화면·입력·게임 진행
+// 키잼: 화면·입력·게임 진행
 import { SONGS } from './core/songs.ts';
 import type { Song } from './core/music.ts';
 import { fromSong, fromBeat, cleanRecorded, levelNumber, arrangeTaps, type Chart, type Note, type Level } from './core/chart.ts';
@@ -1014,15 +1014,15 @@ function drawIosGuide(): void {
   text('아이폰에서 꽉 찬 화면으로 하기', cx, 110, 22, '#2a2440', 'center', 'GalmuriB');
   text('아이폰 사파리는 웹페이지 전체 화면을 지원하지 않아요.', cx, 148, 14, '#4a4466', 'center');
   text('대신 홈 화면에 추가하면 주소창 없이 앱처럼 열려요.', cx, 170, 14, '#4a4466', 'center');
-  const steps = ['① 사파리의 공유 버튼(네모에 ↑)을 누르기', '② 목록에서 "홈 화면에 추가" 고르기', '③ 홈 화면에 생긴 유튜잼 아이콘으로 열기', '④ 휴대폰을 가로로 돌리면 끝!'];
+  const steps = ['① 사파리의 공유 버튼(네모에 ↑)을 누르기', '② 목록에서 "홈 화면에 추가" 고르기', '③ 홈 화면에 생긴 키잼 아이콘으로 열기', '④ 휴대폰을 가로로 돌리면 끝!'];
   steps.forEach((t, i) => text(t, cx - 230, 222 + i * 40, 17, '#2a2440'));
   button('알겠어요', cx - 100, 396, 200, 52, true);
   hitAct(-OX, 0, VW, H, () => { iosGuide = false; });
 }
 function drawTitle(): void {
   background(performance.now() / 1000);
-  text('유튜잼', W / 2, 150, 72, '#ffd75a', 'center', 'GalmuriB');
-  text('YOUTUJAM', W / 2, 205, 22, '#cfd3ea', 'center', 'KFuture');
+  text('키잼', W / 2, 150, 72, '#ffd75a', 'center', 'GalmuriB');
+  text('KEYJAM', W / 2, 205, 22, '#cfd3ea', 'center', 'KFuture');
   const items = titleItems();
   items.forEach((s, i) => { button(s, W / 2 - 120, 260 + i * 66, 240, 54, cursor === i); hitRow(i, W / 2 - 120, 260 + i * 66, 240, 54); });
   text('↑↓ 고르기 · Enter 결정 · 4건반 D F J K · 5건반 D F ␣ J K · 6건반 S D F J K L · 7건반 S D F ␣ J K L', W / 2, 492, 12, '#a9a4c8', 'center');
@@ -1450,7 +1450,7 @@ function exportLib(): void {
   const a = document.createElement('a');
   const d = new Date();
   a.href = URL.createObjectURL(blob);
-  a.download = `youtujam-backup-${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}.json`;
+  a.download = `keyjam-backup-${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}.json`;
   document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
   const charts = lib.videos.reduce((n, v) => n + v.charts.length, 0);
@@ -1461,7 +1461,7 @@ fileIn.addEventListener('change', async () => {
   fileIn.value = '';
   if (!f) return;
   const inc = Lib.parse(await f.text());
-  if (!inc.videos.length) { ytMsg = '유튜잼 백업 파일이 아니거나 비어 있어요.'; return; }
+  if (!inc.videos.length) { ytMsg = '키잼 백업 파일이 아니거나 비어 있어요.'; return; }
   const added = Lib.merge(lib, inc);
   saveLib();
   ytMsg = `가져왔어요: 새 채보 ${added}개 (영상 ${inc.videos.length}개 확인).`;

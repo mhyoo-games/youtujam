@@ -1,6 +1,6 @@
 # 이 저장소에서 작업할 때 지킬 것
 
-유민혁(minhyuk94)의 개인 프로젝트 "유튜잼". 사용자는 한국어로 대화합니다. 화면 글자도 한국어.
+유민혁(minhyuk94)의 개인 프로젝트 "키잼"(KeyJam, 예전 이름은 유튜잼. 저장소·주소는 그대로 /youtujam/). 사용자는 한국어로 대화합니다. 화면 글자도 한국어.
 
 ## 무엇인가
 
@@ -8,6 +8,8 @@
 GitHub Pages(`https://mhyoo-games.github.io/youtujam/`, 조직 mhyoo-games)에 올린다.
 
 ## 지킬 것
+
+- 이름은 **키잼(KeyJam)**. 유튜브 상표와 헷갈리지 않게 이름에 "유튜브·YouTube·유튜" 같은 말을 넣지 않는다. 저장 키(`yj_…`)·주소(`/youtujam/`)는 예전 저장을 지키려고 그대로 둔다.
 
 - 2000년대 국산 온라인 리듬 게임에서 영감을 받았지만 **새로 만든 게임**이다. 다른 게임의 이름·그림·곡·판정 이름을 쓰지 않고, 다른 회사·게임 이름을 README·화면·이력서에 넣지 않는다.
 - 그림: Kenney UI Pack(CC0, `public/assets/KENNEY_LICENSE.txt`) + 코드로 그린 것. 글꼴: 갈무리(OFL), Kenney Future Narrow(CC0).
