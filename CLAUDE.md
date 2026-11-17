@@ -11,6 +11,7 @@ GitHub Pages(`https://mhyoo-games.github.io/youtujam/`, 조직 mhyoo-games)에 �
 
 ## 지킬 것
 
+- 방문 통계: Google Analytics(`G-J2XRD7X74X`, 속성 mhyooGames) — `index.html`. 광고 기능(Google 신호·광고 맞춤) 끔. 자동 시험 브라우저(`navigator.webdriver`)·github.io 밖에서는 켜지 않는다(CI가 통계를 더럽히지 않게).
 - 이름은 **키잼(KeyJam)**. 유튜브 상표와 헷갈리지 않게 이름에 "유튜브·YouTube·유튜" 같은 말을 넣지 않는다. 저장 키(`yj_…`)·주소(`/youtujam/`)는 예전 저장을 지키려고 그대로 둔다.
 
 - 2000년대 국산 온라인 리듬 게임에서 영감을 받았지만 **새로 만든 게임**이다. 다른 게임의 이름·그림·곡·판정 이름을 쓰지 않고, 다른 회사·게임 이름을 README·화면·이력서에 넣지 않는다.
